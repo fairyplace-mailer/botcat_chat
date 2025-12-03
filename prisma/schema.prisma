@@ -1,0 +1,168 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ConversationStatus {
+  active
+  closed
+}
+
+enum AttachmentKind {
+  user_upload
+  bot_generated
+  external_url
+}
+
+enum EmailStatus {
+  queued
+  sent
+  failed
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String?        @unique
+  created_at    DateTime       @default(now())
+  updated_at    DateTime       @updatedAt
+
+  conversations Conversation[]
+}
+
+model Conversation {
+  id                String             @id @default(uuid())
+  chat_name         String             @unique
+  user_id           String?
+  status            ConversationStatus
+  language_original String
+  send_to_internal  Boolean            @default(true)
+  started_at        DateTime
+  finished_at       DateTime?
+  last_activity_at  DateTime
+  message_count     Int                @default(0)
+  meta              Json?
+
+  user          User?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  messages      Message[]
+  attachments   Attachment[]
+  email_logs    EmailLog[]
+  webhook_logs  WebhookLog[]
+
+  @@index([user_id, started_at])
+  @@index([status, last_activity_at])
+}
+
+model Message {
+  id                    String     @id @default(uuid())
+  conversation_id       String
+  message_id            String     @unique
+  role                  String
+  content_original_md   String
+  content_translated_md String?
+  has_attachments       Boolean    @default(false)
+  has_links             Boolean    @default(false)
+  is_voice              Boolean    @default(false)
+  created_at            DateTime
+  sequence              Int
+
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  attachments  Attachment[]
+
+  @@index([conversation_id, sequence])
+  @@index([conversation_id, created_at])
+}
+
+model Attachment {
+  id                String         @id @default(uuid())
+  conversation_id   String
+  message_id        String
+  kind              AttachmentKind
+  file_name         String?
+  mime_type         String?
+  file_size_bytes   Int?
+  page_count        Int?
+  blob_key_original String?
+  blob_url_original String?
+  blob_url_preview  String?
+  external_url      String?
+  created_at        DateTime       @default(now())
+  expires_at        DateTime
+  deleted_at        DateTime?
+
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  message      Message      @relation(fields: [message_id], references: [message_id])
+
+  @@index([conversation_id])
+  @@index([message_id])
+  @@index([expires_at])
+  @@index([kind, created_at])
+}
+
+model EmailLog {
+  id                  String      @id @default(uuid())
+  conversation_id     String
+  recipient_email     String
+  subject             String
+  status              EmailStatus
+  provider_message_id String?
+  error_message       String?
+  created_at          DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id, created_at])
+  @@index([status, created_at])
+}
+
+model WebhookLog {
+  id              String      @id @default(uuid())
+  conversation_id String?
+  payload         Json
+  status_code     Int
+  error_message   String?
+  created_at      DateTime    @default(now())
+
+  conversation Conversation? @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
+
+  @@index([conversation_id, created_at])
+}
+
+model DailyStats {
+  date                   DateTime
+  channel                String   @default("web")
+  total_conversations    Int      @default(0)
+  total_messages         Int      @default(0)
+  total_attachments      Int      @default(0)
+  total_emails_sent      Int      @default(0)
+  total_tokens_prompt    BigInt   @default(0)
+  total_tokens_completion BigInt  @default(0)
+  total_tokens_total     BigInt   @default(0)
+  total_uploaded_bytes   BigInt   @default(0)
+  total_blob_files       Int      @default(0)
+  created_at             DateTime @default(now())
+
+  @@id([date, channel])
+  @@index([date])
+}
+
+model CronLock {
+  name         String   @id
+  locked_at    DateTime
+  locked_until DateTime
+  meta         Json?
+}
+
+model CleanupLog {
+  id                          String   @id @default(uuid())
+  task_name                   String
+  run_started_at              DateTime
+  run_finished_at             DateTime?
+  deleted_attachments_count   Int      @default(0)
+  deleted_conversations_count Int      @default(0)
+  errors                      Json?
+
+  @@index([task_name, run_started_at])
+}
