@@ -81,7 +81,7 @@ export type BotCatFinalJson = z.infer<typeof BotCatFinalJsonSchema>;
 
 // --- Опции сборки финального JSON ---
 
-export type BuildFinalJsonOptions = {
+type BuildFinalJsonOptions = {
   preamble_md?: string;
   footerInternal_md?: string;
   footerClient_md?: string;
@@ -105,11 +105,11 @@ export async function buildFinalJsonByChatName(
   });
 
   if (!conversation) {
-    throw new Error(`Conversation with chatName="${chatName}" not found`);
+    throw new Error(`Conversation with chatName=\"${chatName}\" not found`);
   }
 
   // messages[]
-  const messages: BotCatMessage[] = conversation.messages.map((m) => ({
+  const messages: BotCatMessage[] = conversation.messages.map((m: any) => ({
     messageId: m.message_id,
     role: m.role as BotCatMessage["role"],
     contentOriginal_md: m.content_original_md,
