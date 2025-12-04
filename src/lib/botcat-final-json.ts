@@ -1,3 +1,4 @@
+cat << 'EOF' > src/lib/botcat-final-json.ts
 // src/lib/botcat-final-json.ts
 
 import { z } from "zod";
@@ -25,7 +26,7 @@ export type BotCatMessage = z.infer<typeof BotCatMessageSchema>;
 
 export const BotCatTranslatedMessageEntrySchema = z.object({
   contentTranslated_md: z.string(),
-  language: z.string().min(2).max(5),
+  language: z.string().min(2).max(5), // "ru" и пр.
 });
 
 export type BotCatTranslatedMessageEntry = z.infer<
@@ -65,8 +66,7 @@ export const BotCatFinalJsonSchema = z.object({
 
   messages: z.array(BotCatMessageSchema),
 
-  // ✔️ Исправлено: z.record(KEY_SCHEMA, VALUE_SCHEMA)
-  translatedMessages: z.record(z.string(), BotCatTranslatedMessageEntrySchema),
+  translatedMessages: z.record(BotCatTranslatedMessageEntrySchema),
 
   attachments: z.array(BotCatAttachmentSchema),
 
@@ -109,7 +109,7 @@ export async function buildFinalJsonByChatName(
   }
 
   // messages[]
-  const messages: BotCatMessage[] = conversation.messages.map((m) => ({
+  const messages: BotCatMessage[] = conversation.messages.map((m: any) => ({
     messageId: m.message_id,
     role: m.role as BotCatMessage["role"],
     contentOriginal_md: m.content_original_md,
@@ -125,7 +125,7 @@ export async function buildFinalJsonByChatName(
   const languageOriginal =
     (conversation.language_original || "und").trim() || "und";
 
-  for (const m of conversation.messages) {
+  for (const m of conversation.messages as any[]) {
     const translatedText =
       m.content_translated_md ?? m.content_original_md ?? "";
 
@@ -136,21 +136,23 @@ export async function buildFinalJsonByChatName(
   }
 
   // attachments[]
-  const attachments: BotCatAttachment[] = conversation.attachments.map((a) => ({
-    attachmentId: a.id,
-    messageId: a.message_id,
-    kind: a.kind as BotCatAttachment["kind"],
+  const attachments: BotCatAttachment[] = conversation.attachments.map(
+    (a: any) => ({
+      attachmentId: a.id,
+      messageId: a.message_id,
+      kind: a.kind as BotCatAttachment["kind"],
 
-    fileName: a.file_name,
-    mimeType: a.mime_type,
-    fileSizeBytes:
-      typeof a.file_size_bytes === "number" ? a.file_size_bytes : null,
-    pageCount: typeof a.page_count === "number" ? a.page_count : null,
+      fileName: a.file_name,
+      mimeType: a.mime_type,
+      fileSizeBytes:
+        typeof a.file_size_bytes === "number" ? a.file_size_bytes : null,
+      pageCount: typeof a.page_count === "number" ? a.page_count : null,
 
-    originalUrl: a.external_url,
-    blobUrlOriginal: a.blob_url_original,
-    blobUrlPreview: a.blob_url_preview,
-  }));
+      originalUrl: a.external_url,
+      blobUrlOriginal: a.blob_url_original,
+      blobUrlPreview: a.blob_url_preview,
+    })
+  );
 
   const preamble_md = options.preamble_md ?? "";
   const footerInternal_md = options.footerInternal_md ?? "";
@@ -175,3 +177,4 @@ export async function buildFinalJsonByChatName(
 
   return draft;
 }
+EOF
