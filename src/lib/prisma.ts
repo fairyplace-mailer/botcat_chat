@@ -1,11 +1,17 @@
-import { PrismaClient } from "@prisma/client";
+import * as Prisma from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import pkg from "pg";
+import pg from "pg";
 
-const { Pool } = pkg;
+const { Pool } = pg;
+
+// Берём PrismaClient из пространства имён, без жёсткой привязки к типам
+// чтобы не падать на разных версиях @prisma/client
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PrismaClient: any = (Prisma as any).PrismaClient;
 
 const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClient;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  prisma?: any;
 };
 
 const pool = new Pool({
@@ -18,7 +24,10 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     adapter,
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+    log:
+      process.env.NODE_ENV === "development"
+        ? ["query", "error", "warn"]
+        : ["error"],
   });
 
 if (process.env.NODE_ENV !== "production") {
