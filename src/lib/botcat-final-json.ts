@@ -1,8 +1,11 @@
-cat << 'EOF' > src/lib/botcat-final-json.ts
 // src/lib/botcat-final-json.ts
 
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import {
+  BotCatAttachmentSchema,
+  BotCatAttachment,
+} from "@/lib/botcat-attachment";
 
 /**
  * Zod-схемы под итоговый JSON BotCat → backend.
@@ -33,29 +36,6 @@ export type BotCatTranslatedMessageEntry = z.infer<
   typeof BotCatTranslatedMessageEntrySchema
 >;
 
-export const BotCatAttachmentKindSchema = z.enum([
-  "user_upload",
-  "bot_generated",
-  "external_url",
-]);
-
-export const BotCatAttachmentSchema = z.object({
-  attachmentId: z.string().min(1),
-  messageId: z.string().min(1),
-  kind: BotCatAttachmentKindSchema,
-
-  fileName: z.string().nullable(),
-  mimeType: z.string().nullable(),
-  fileSizeBytes: z.number().int().nullable(),
-  pageCount: z.number().int().nullable(),
-
-  originalUrl: z.string().nullable(),
-  blobUrlOriginal: z.string().nullable(),
-  blobUrlPreview: z.string().nullable(),
-});
-
-export type BotCatAttachment = z.infer<typeof BotCatAttachmentSchema>;
-
 // --- Итоговый JSON ---
 
 export const BotCatFinalJsonSchema = z.object({
@@ -66,7 +46,7 @@ export const BotCatFinalJsonSchema = z.object({
 
   messages: z.array(BotCatMessageSchema),
 
-  translatedMessages: z.record(BotCatTranslatedMessageEntrySchema),
+  translatedMessages: z.record(z.string(), BotCatTranslatedMessageEntrySchema),
 
   attachments: z.array(BotCatAttachmentSchema),
 
@@ -177,4 +157,3 @@ export async function buildFinalJsonByChatName(
 
   return draft;
 }
-EOF
