@@ -1,4 +1,4 @@
-"use client";
+// "use client";
 
 import React, { useState, useCallback } from "react";
 import ChatHeader from "../../components/chat/ChatHeader";
@@ -17,42 +17,40 @@ export default function ChatPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const sendMessage = useCallback(
-    async (text: string, file?: File) => {
-      if (loading) return;
-      setLoading(true);
+  // Функция отправки сообщения
+  const sendMessage = useCallback(async (text: string, file?: File) => {
+    if (loading) return;
+    setLoading(true);
+    setIsTyping(true);
 
-      const formData = new FormData();
-      formData.append("message", text);
-      if (file) formData.append("file", file);
+    const formData = new FormData();
+    formData.append("message", text);
+    if (file) formData.append("file", file);
 
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          body: formData,
-        });
-        if (!res.ok) throw new Error("Ошибка сети");
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Ошибка сети");
 
-        const data = await res.json();
-
-        if (Array.isArray(data.messages)) {
-          setMessages(data.messages);
-        } else if (data.message) {
-          setMessages((prev) => [...prev, data.message]);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-        setIsTyping(false);
+      const data = await res.json();
+      // Если API возвращает сообщение, то добавляем его, иначе ничего не добавляем
+      if (data.message) {
+        setMessages((prev) => [...prev, data.message]);
       }
-    },
-    [loading]
-  );
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+      setIsTyping(false);
+    }
+  }, [loading]);
 
   return (
     <div className="flex flex-col h-screen max-w-3xl mx-auto border rounded shadow">
-      <ChatHeader title="Чат с BotCat" />
+      {/* Убираем title, так как ChatHeader не принимает title prop */}
+      <ChatHeader />
       <ChatWindow messages={messages} isTyping={isTyping} />
       <MessageInput onSend={sendMessage} disabled={loading} />
     </div>
