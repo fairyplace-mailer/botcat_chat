@@ -2,31 +2,41 @@ import React from "react";
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 
-export default function ChatWindow({ messages = [], isTyping = false }: {
-  messages?: Array<{
-    author: "bot" | "user";
-    text: string;
-    imgBase64?: string;
-    fileName?: string;
-  }>;
-  isTyping?: boolean;
-}) {
-  // Заглушка chat demo
-  const demo = messages.length === 0;
-  const chat = demo
-    ? [
-        { author: "bot", text: "Hi, I'm Botcat! You can upload files and talk with me. 🐾" },
-        { author: "user", text: "Hello! Can you see images?" },
-        { author: "bot", text: "Sure! Try attaching an image file or pasting base64.", imgBase64: "/BotCat_Portrait.png" },
-        { author: "user", text: "[file] This is a PDF report.", fileName: "report.pdf" },
-      ]
-    : messages;
+// Demo base64 (картинка BotCat)
+const botCatImg = "/BotCat_Portrait.png";
+
+const MOCK_CHAT = [
+  {
+    author: "bot",
+    text: "Hello! I am Botcat. How can I assist you today?",
+  },
+  {
+    author: "user",
+    text: "Hi! Can you show me a cat picture?",
+  },
+  {
+    author: "bot",
+    text: "Sure! Here is one:",
+    imgBase64: botCatImg,
+  },
+  {
+    author: "user",
+    text: "Thanks! Here is my report.",
+    fileName: "report.pdf",
+  },
+];
+
+const isTyping = true; // for demo
+
+const ChatWindow: React.FC = () => {
   return (
     <div className="chat-window">
-      {chat.map((m, i) => (
+      {MOCK_CHAT.map((m, i) => (
         <MessageBubble key={i} {...m} />
       ))}
       {isTyping && <TypingIndicator />}
     </div>
   );
-}
+};
+
+export default ChatWindow;
