@@ -1,7 +1,16 @@
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 
-const chat = [
+// Strict message type
+type Author = "bot" | "user";
+interface Message {
+  author: Author;  // strictly "bot" | "user"
+  text: string;
+  imgBase64?: string;
+  fileName?: string;
+}
+
+const chat: Message[] = [
   { author: "bot", text: "Hello! I am Botcat. How can I help you today?" },
   { author: "user", text: "Show me a cat picture!" },
   { author: "bot", text: "Here is a sample image:", imgBase64: "/BotCat_Portrait.png" },
