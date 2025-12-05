@@ -23,7 +23,6 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
               Enable notifications
             </label>
           </div>
-          <button className="clear-chat-btn" onClick={() => alert("Clear chat not implemented in mock.")}>Clear chat</button>
         </div>
         <button className="dialog-close" onClick={onClose}>Close</button>
       </div>
