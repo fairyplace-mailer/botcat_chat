@@ -1,28 +1,33 @@
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 
-// Strict message type
-type Author = "bot" | "user";
-interface Message {
-  author: Author;  // strictly "bot" | "user"
+// строгий тип Message как в spec.md
+export type Author = "bot" | "user";
+export interface Message {
+  author: Author;
   text: string;
   imgBase64?: string;
   fileName?: string;
 }
 
-const chat: Message[] = [
-  { author: "bot", text: "Hello! I am Botcat. How can I help you today?" },
-  { author: "user", text: "Show me a cat picture!" },
-  { author: "bot", text: "Here is a sample image:", imgBase64: "/BotCat_Portrait.png" },
-  { author: "user", text: "I am attaching a file.", fileName: "data_report.pdf" },
-  { author: "bot", text: "Thank you for your file, processing..." }
-];
+interface ChatWindowProps {
+  messages: Message[];
+  isTyping: boolean;
+}
 
-export default function ChatWindow() {
-  const isTyping = true;
+export default function ChatWindow({ messages, isTyping }: ChatWindowProps) {
   return (
-    <div className="chat-window" style={{ flex: 1, padding: 16, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-      {chat.map((m, i) => (
+    <div
+      className="chat-window"
+      style={{
+        flex: 1,
+        padding: 16,
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {messages.map((m, i) => (
         <MessageBubble key={i} {...m} />
       ))}
       {isTyping && <TypingIndicator />}
