@@ -21,7 +21,7 @@ export default function Home() {
           text: message,
           attachments: attachments?.map(att => ({
             fileName: att.fileName,
-            blobUrl: att.blobUrl,
+            blobUrlOriginal: att.blobUrlOriginal,
             mimeType: att.mimeType,
             fileSizeBytes: att.fileSizeBytes
           })),
