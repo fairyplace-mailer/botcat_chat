@@ -16,18 +16,16 @@ export default function Home() {
     try {
       setMessages((prev) => [
         ...prev,
-        ...[
-          {
-            author: "user",
-            text: message,
-            attachments: attachments?.map(att => ({
-              fileName: att.fileName,
-              blobUrl: att.blobUrl,
-              mimeType: att.mimeType,
-              fileSizeBytes: att.fileSizeBytes
-            })),
-          },
-        ],
+        {
+          author: "user",
+          text: message,
+          attachments: attachments?.map(att => ({
+            fileName: att.fileName,
+            blobUrl: att.blobUrl,
+            mimeType: att.mimeType,
+            fileSizeBytes: att.fileSizeBytes
+          })),
+        },
       ]);
 
       const response = await fetch("/api/chat", {
