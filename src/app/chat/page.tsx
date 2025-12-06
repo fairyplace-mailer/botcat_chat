@@ -8,8 +8,8 @@ export default function ChatPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Updated sendMessage to accept only a message string
-  async function sendMessage(message: string): Promise<void> {
+  // Explicitly typing sendMessage to match (message: string) => Promise<void>
+  const sendMessage: (message: string) => Promise<void> = async (message: string) => {
     // Clear any error
     setError(null);
     // Add the new message to the conversation
@@ -28,7 +28,7 @@ export default function ChatPage() {
     } finally {
       setIsTyping(false);
     }
-  }
+  };
 
   // Handler for "Новый диалог" button
   function handleNewDialog() {
