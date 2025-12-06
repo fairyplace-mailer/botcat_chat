@@ -1,60 +1,108 @@
 "use client";
 import React, { useState } from "react";
 import ChatWindow, { Message } from "../components/chat/ChatWindow";
-import MessageInput from "../components/chat/MessageInput";
+import MessageInput, { MessageInputData, BotCatAttachment } from "../components/chat/MessageInput";
 
 export default function Home() {
-  // --- 2. Минимальный стейт только для чата ---
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Получить ответ бота
-  async function sendMessage(message: string) {
+  async function sendMessage({ message, attachments }: MessageInputData) {
     setError(null);
     setIsTyping(true);
+    const token = process.env.NEXT_PUBLIC_ACCESS_TOKEN || "";
+
     try {
-      const res = await fetch("/api/chat", {
+      setMessages((prev) => [
+        ...prev,
+        {
+          author: "user",
+          text: message,
+          attachments: attachments?.map(att => ({
+            fileName: att.fileName,
+            blobUrlOriginal: att.blobUrlOriginal,
+            mimeType: att.mimeType,
+            fileSizeBytes: att.fileSizeBytes
+          })),
+        },
+      ]);
+
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Access-Token": token,
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, attachments }),
       });
-      if (!res.ok) throw new Error("Ошибка сети");
-      const data = await res.json();
-      setMessages(prev => [
+
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      setMessages((prev) => [
         ...prev,
-        { author: "user", text: message },
-        { author: "bot", text: data.reply }
+        {
+          author: "bot",
+          text: data.reply,
+          attachments: data.attachments,
+        },
       ]);
     } catch (e: any) {
-      setError(e.message || "Произошла неизвестная ошибка");
+      setError(e.message || "Unknown error");
     } finally {
       setIsTyping(false);
     }
   }
 
-  // Новый диалог (очистка истории)
   function handleNewChat() {
     setMessages([]);
     setError(null);
   }
 
-  // --- 3. Минималистичная разметка, стиль ChatGPT ---
   return (
-    <main className="chat-page" style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc" }}>
-        <span style={{ fontWeight: 700, fontSize: 18, letterSpacing: 0.5 }}>BotCat Chat</span>
-        <button onClick={handleNewChat} style={{ background: "#10a37f", color: "#fff", border: 0, borderRadius: 6, padding: "6px 14px", fontWeight: 600, cursor: "pointer" }}>
+    <main
+      className="chat-page"
+      style={{ display: "flex", flexDirection: "column", height: "100vh" }}
+    >
+      <div
+        style={{
+          padding: "10px",
+          borderBottom: "1px solid #eee",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h1 style={{ margin: 0, fontWeight: 600, fontSize: "1.25rem" }}>BotCat Chat</h1>
+        <button
+          onClick={handleNewChat}
+          style={{
+            backgroundColor: "#10a37f",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            padding: "6px 12px",
+            cursor: "pointer",
+          }}
+        >
           Новый диалог
         </button>
       </div>
       <ChatWindow messages={messages} isTyping={isTyping} />
-      {error && <div className="chat-error" role="alert" style={{ color: "#e00", background: "#fff5f5", padding: "8px", textAlign: "center" }}>{error}</div>}
-      <div style={{ borderTop: "1px solid #eee", background: "#fcfcfd" }}>
-        <MessageInput onSend={sendMessage} />
-      </div>
+      {error && (
+        <div
+          className="chat-error"
+          role="alert"
+          style={{ color: "red", padding: "8px", textAlign: "center" }}
+        >
+          {error}
+        </div>
+      )}
+      <MessageInput onSend={sendMessage} />
     </main>
   );
 }

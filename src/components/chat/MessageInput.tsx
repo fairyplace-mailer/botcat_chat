@@ -1,57 +1,19 @@
-import React, { useState, ChangeEvent, FormEvent } from "react";
-import FilePreview from "./FilePreview";
+import type { BotCatAttachmentJson as BotCatAttachment } from "@/server/attachments/blob-mapper";
+export type { BotCatAttachment };
 
-export default function MessageInput({
-  onSend,
-}: {
-  onSend: (data: { message: string; file?: File }) => void;
-}) {
-  const [message, setMessage] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+export type MessageInputData = {
+  message: string;
+  attachments?: BotCatAttachment[];
+};
 
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    if (e.target.files?.length) {
-      setFile(e.target.files[0]);
-    }
-  }
-
-  function handleSend(e: FormEvent) {
-    e.preventDefault();
-    if (message.trim() || file) {
-      onSend({ message, file: file || undefined });
-      setMessage("");
-      setFile(null);
-    }
-  }
-  function handleFileClear() {
-    setFile(null);
-  }
-
-  return (
-    <form className="message-input" onSubmit={handleSend}>
-      <input
-        type="text"
-        value={message}
-        onChange={e => setMessage(e.target.value)}
-        placeholder="Type your message..."
-        className="input-field"
-        aria-label="Message"
-        autoComplete="off"
-      />
-      <label className="attach-btn" title="Attach file">
-        <input
-          type="file"
-          hidden
-          onChange={handleFileChange}
-        />
-        📎
-      </label>
-      {file && (
-        <FilePreview file={file} onClear={handleFileClear} />
-      )}
-      <button type="submit" className="send-btn" aria-label="Send message">
-        ➤
-      </button>
-    </form>
-  );
+export interface MessageInputProps {
+  onSend: (data: MessageInputData) => void;
+  // можно добавить и другие пропсы по ТЗ (например, disabled, loading, initialAttachments и т.д.)
 }
+
+export function MessageInput(props: MessageInputProps) {
+  // Реализация компонента (UI, upload-логика и т.д.) здесь
+  return <div>MessageInput Component</div>;
+}
+
+export default MessageInput;
