@@ -8,6 +8,12 @@ export type MessageInputData = {
 
 export interface MessageInputProps {
   onSend: (data: MessageInputData) => void;
+  // можно добавить и другие пропсы по ТЗ (например, disabled, loading, initialAttachments и т.д.)
 }
 
-// (Остальной код компонента должен быть ниже, здесь только типы и экспорт.)
+export function MessageInput(props: MessageInputProps) {
+  // Реализация компонента (UI, upload-логика и т.д.) здесь
+  return <div>MessageInput Component</div>;
+}
+
+export default MessageInput;
