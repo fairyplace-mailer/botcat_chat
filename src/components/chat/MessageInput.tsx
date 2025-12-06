@@ -1,4 +1,5 @@
-export type { BotCatAttachmentJson as BotCatAttachment } from "@/server/attachments/blob-mapper";
+import type { BotCatAttachmentJson as BotCatAttachment } from "@/server/attachments/blob-mapper";
+export type { BotCatAttachment };
 
 export type MessageInputData = {
   message: string;
@@ -7,11 +8,6 @@ export type MessageInputData = {
 
 export interface MessageInputProps {
   onSend: (data: MessageInputData) => void;
-  // здесь можно добавить другие пропсы, если потребуется (например, disabled, loading и т.д.)
 }
 
-export function MessageInput(props: MessageInputProps) {
-  return <div>MessageInput Component</div>;
-}
-
-export default MessageInput;
+// (Остальной код компонента должен быть ниже, здесь только типы и экспорт.)
