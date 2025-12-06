@@ -3,7 +3,7 @@ import React, { useState, FormEvent } from "react";
 export default function MessageInput({
   onSend,
 }: {
-  onSend: (message: string) => void;
+  onSend: (message: string) => Promise<void> | void;
 }) {
   const [message, setMessage] = useState("");
 
