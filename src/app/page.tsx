@@ -1,22 +1,32 @@
 "use client";
 import React, { useState } from "react";
 import ChatWindow, { Message } from "../components/chat/ChatWindow";
-import MessageInput from "../components/chat/MessageInput";
+import MessageInput, { MessageInputData } from "../components/chat/MessageInput";
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function sendMessage({ message }: { message: string }) {
+  async function sendMessage({ message, file }: MessageInputData) {
     setError(null);
     setIsTyping(true);
     const token = process.env.NEXT_PUBLIC_ACCESS_TOKEN || "";
-
     try {
       const formData = new FormData();
       formData.append("message", message);
-
+      if (file) {
+        formData.append("file", file);
+      }
+      setMessages(prev => [
+        ...prev,
+        {
+          author: "user",
+          text: message,
+          fileName: file ? file.name : undefined,
+          imgBase64: file && file.type.startsWith("image/") ? await fileToBase64(file) : undefined,
+        },
+      ]);
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -24,14 +34,19 @@ export default function Home() {
         },
         body: formData,
       });
-
       if (!response.ok) {
         throw new Error(`Error ${response.status}: ${response.statusText}`);
       }
-
       const data = await response.json();
-
-      setMessages(prev => [...prev, { author: "user", text: message }, { author: "bot", text: data.reply }]);
+      setMessages(prev => [
+        ...prev,
+        {
+          author: "bot",
+          text: data.reply,
+          imgBase64: data.imgBase64,
+          fileName: data.fileName,
+        },
+      ]);
     } catch (e: any) {
       setError(e.message || "Unknown error");
     } finally {
@@ -57,4 +72,13 @@ export default function Home() {
       <MessageInput onSend={sendMessage} />
     </main>
   );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
