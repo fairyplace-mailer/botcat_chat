@@ -1,6 +1,5 @@
 import React, { useState, useRef } from "react";
 import type { BotCatAttachmentJson as BotCatAttachment } from "@/server/attachments/blob-mapper";
-import { upload } from "@vercel/blob";
 
 export type { BotCatAttachment };
 
@@ -48,7 +47,6 @@ export function MessageInput(props: MessageInputProps) {
     setError(null);
     setUploading(true);
     for (const file of files) {
-      // Валидация
       if (file.size > MAX_SIZE) {
         setError(`Файл ${file.name} превышает лимит 4.5 МБ`);
         continue;
@@ -58,12 +56,33 @@ export function MessageInput(props: MessageInputProps) {
         continue;
       }
       try {
-        // Upload в Vercel Blob
-        const uploaded = await upload(file.name, file, {
-          access: "public",
-          handleUploadUrl: "/api/blob/upload",
+        // 1. Получить uploadUrl с backend
+        const res = await fetch("/api/blob/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            mimeType: file.type,
+            fileSizeBytes: file.size,
+          }),
         });
-        // Формируем объект вложения
+        if (!res.ok) {
+          setError(`Ошибка подготовки upload для ${file.name}`);
+          continue;
+        }
+        const { uploadUrl, blobUrl, blobKey } = await res.json();
+
+        // 2. Загрузка файла на uploadUrl
+        const uploadRes = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type }
+        });
+        if (!uploadRes.ok) {
+          setError(`Ошибка загрузки файла ${file.name}`);
+          continue;
+        }
+
         setAttachments(a => [
           ...a,
           {
@@ -73,13 +92,13 @@ export function MessageInput(props: MessageInputProps) {
             fileName: file.name,
             mimeType: file.type,
             fileSizeBytes: file.size,
-            blobUrlOriginal: uploaded.url,
-            originalUrl: uploaded.url,
+            blobUrlOriginal: blobUrl,
+            originalUrl: blobUrl,
             blobUrlPreview: null,
             pageCount: null,
           }
         ]);
-      } catch (err: any) {
+      } catch (err) {
         setError(`Ошибка загрузки файла ${file.name}`);
       }
     }
