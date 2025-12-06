@@ -11,7 +11,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
     - uses: actions/checkout@v3
     - name: Use Node.js 20
