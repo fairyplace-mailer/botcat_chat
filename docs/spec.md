@@ -182,7 +182,7 @@ Postgres DB
 
 3.2.1. **Frontend UI (Next.js / React)**
 
-• Web‑чат на https://fairyplace.net/chat\
+• Web‑чат на https://fairyplace.net\
 • Пузырьки сообщений\
 • Загрузка файлов напрямую в Blob\
 • Предпросмотр изображений\
