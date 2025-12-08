@@ -28,7 +28,12 @@ export default function ChatWindow({ messages, isTyping }: ChatWindowProps) {
       }}
     >
       {messages.map((m, i) => (
-        <MessageBubble key={i} {...m} />
+        <MessageBubble
+          key={i}
+          author={m.author}
+          text={m.text}
+          attachments={m.attachments || []}
+        />
       ))}
       {isTyping && <TypingIndicator />}
     </div>
