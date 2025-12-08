@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import type { BotCatAttachmentJson as BotCatAttachment } from "@/server/attachments/blob-mapper";
+import { BotCatAttachment } from "@/lib/botcat-attachment";
 
 export type { BotCatAttachment };
 
@@ -22,7 +22,7 @@ const ACCEPT_MIME = [
   "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 ];
-const MAX_SIZE = 4.5 * 1024 * 1024; // 4.5 МБ
+const MAX_SAFE_SIZE = 512 * 1024 * 1024; // 512 MB предохранитель
 
 export function MessageInput(props: MessageInputProps) {
   const [message, setMessage] = useState("");
@@ -47,8 +47,8 @@ export function MessageInput(props: MessageInputProps) {
     setError(null);
     setUploading(true);
     for (const file of files) {
-      if (file.size > MAX_SIZE) {
-        setError(`Файл ${file.name} превышает лимит 4.5 МБ`);
+      if (file.size > MAX_SAFE_SIZE) {
+        setError(`Файл ${file.name} превышает лимит 512 МБ`);
         continue;
       }
       if (!ACCEPT_MIME.includes(file.type)) {
@@ -63,20 +63,20 @@ export function MessageInput(props: MessageInputProps) {
           body: JSON.stringify({
             fileName: file.name,
             mimeType: file.type,
-            fileSizeBytes: file.size,
-          }),
+            fileSizeBytes: file.size
+          })
         });
         if (!res.ok) {
           setError(`Ошибка подготовки upload для ${file.name}`);
           continue;
         }
-        const { uploadUrl, blobUrl, blobKey } = await res.json();
+        const { uploadUrl, blobUrl } = await res.json();
 
         // 2. Загрузка файла на uploadUrl
         const uploadRes = await fetch(uploadUrl, {
           method: "PUT",
           body: file,
-          headers: { "Content-Type": file.type }
+          headers: { "Content-Type": file.type },
         });
         if (!uploadRes.ok) {
           setError(`Ошибка загрузки файла ${file.name}`);
@@ -89,14 +89,14 @@ export function MessageInput(props: MessageInputProps) {
             attachmentId: crypto.randomUUID(),
             messageId: "",
             kind: "user_upload",
-            fileName: file.name,
-            mimeType: file.type,
-            fileSizeBytes: file.size,
-            blobUrlOriginal: blobUrl,
-            originalUrl: blobUrl,
-            blobUrlPreview: null,
+            fileName: file.name || null,
+            mimeType: file.type || null,
+            fileSizeBytes: file.size || null,
             pageCount: null,
-          }
+            originalUrl: blobUrl,
+            blobUrlOriginal: blobUrl,
+            blobUrlPreview: null,
+          } satisfies BotCatAttachment
         ]);
       } catch (err) {
         setError(`Ошибка загрузки файла ${file.name}`);

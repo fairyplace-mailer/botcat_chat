@@ -1,13 +1,13 @@
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
+import { BotCatAttachment } from "../../lib/botcat-attachment";
 
 // строгий тип Message как в spec.md
 export type Author = "bot" | "user";
 export interface Message {
   author: Author;
   text: string;
-  imgBase64?: string;
-  fileName?: string;
+  attachments: BotCatAttachment[];
 }
 
 interface ChatWindowProps {
@@ -28,7 +28,12 @@ export default function ChatWindow({ messages, isTyping }: ChatWindowProps) {
       }}
     >
       {messages.map((m, i) => (
-        <MessageBubble key={i} {...m} />
+        <MessageBubble
+          key={i}
+          author={m.author}
+          text={m.text}
+          attachments={m.attachments || []}
+        />
       ))}
       {isTyping && <TypingIndicator />}
     </div>

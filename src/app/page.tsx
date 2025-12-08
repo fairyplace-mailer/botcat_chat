@@ -8,23 +8,32 @@ export default function Home() {
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function normalizeAttachment(att: Partial<BotCatAttachment>): BotCatAttachment {
+    return {
+      attachmentId: att.attachmentId || "",
+      messageId: att.messageId || "",
+      kind: att.kind || "user_upload",
+      fileName: att.fileName ?? null,
+      mimeType: att.mimeType ?? null,
+      fileSizeBytes: att.fileSizeBytes ?? null,
+      pageCount: att.pageCount ?? null,
+      originalUrl: att.originalUrl ?? null,
+      blobUrlOriginal: att.blobUrlOriginal ?? null,
+      blobUrlPreview: att.blobUrlPreview ?? att.blobUrlOriginal ?? null,
+    };
+  }
+
   async function sendMessage({ message, attachments }: MessageInputData) {
     setError(null);
     setIsTyping(true);
     const token = process.env.NEXT_PUBLIC_ACCESS_TOKEN || "";
-
     try {
       setMessages((prev) => [
         ...prev,
         {
           author: "user",
           text: message,
-          attachments: attachments?.map(att => ({
-            fileName: att.fileName,
-            blobUrlOriginal: att.blobUrlOriginal,
-            mimeType: att.mimeType,
-            fileSizeBytes: att.fileSizeBytes
-          })),
+          attachments: attachments ? attachments.map(normalizeAttachment) : [],
         },
       ]);
 
@@ -48,7 +57,7 @@ export default function Home() {
         {
           author: "bot",
           text: data.reply,
-          attachments: data.attachments,
+          attachments: data.attachments ? data.attachments.map(normalizeAttachment) : [],
         },
       ]);
     } catch (e: any) {

@@ -1,51 +1,47 @@
 import React from "react";
-import Image from "next/image";
+import type { BotCatAttachment } from "../../lib/botcat-attachment";
 
 interface MessageBubbleProps {
-  author: "bot" | "user";
+  author: string;
   text: string;
-  avatarUrl?: string;
-  imgBase64?: string;
-  fileName?: string;
+  attachments: BotCatAttachment[];
 }
 
-export default function MessageBubble({ author, text, avatarUrl, imgBase64, fileName }: MessageBubbleProps) {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ author, text, attachments }) => {
   return (
-    <div className={`message-bubble ${author}`}>      
-      <div className="bubble-row">
-        {author === "bot" && (
-          <Image
-            src={avatarUrl || "/BotCat_Portrait.png"}
-            alt="Avatar"
-            className="bubble-avatar"
-            width={32}
-            height={32}
-          />
-        )}
-        <div className="bubble-content">
-          <div className="bubble-text">{text}</div>
-          {imgBase64 && (
-            <img
-              src={imgBase64}
-              alt="image reply"
-              className="bubble-img"
-              style={{ maxWidth: 240, maxHeight: 180, borderRadius: 16 }}
-            />
-          )}
-          {fileName && (
-            <div className="file-attachment">📎 {fileName}</div>
-          )}
+    <div className={`message-bubble message-bubble-${author}`.toLowerCase()}>
+      <div className="message-text">{text}</div>
+      {attachments && attachments.length > 0 && (
+        <div className="attachments-list">
+          {attachments.map((att) => {
+            if (att.mimeType?.startsWith("image/")) {
+              return att.blobUrlPreview ? (
+                <a
+                  key={att.attachmentId}
+                  href={att.blobUrlOriginal ?? att.originalUrl ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img src={att.blobUrlPreview ?? undefined} alt="attachment preview" />
+                </a>
+              ) : null;
+            } else {
+              return (
+                <a
+                  key={att.attachmentId}
+                  href={att.blobUrlOriginal ?? att.originalUrl ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {att.fileName ?? "Файл"}
+                </a>
+              );
+            }
+          })}
         </div>
-        {author === "user" && (
-          <Image
-            src={avatarUrl || "/user.svg"}
-            alt="User avatar"
-            className="bubble-avatar user"
-            width={32}
-            height={32}
-          />
-        )}
-      </div>
+      )}
     </div>
   );
-}
+};
+
+export default MessageBubble;
