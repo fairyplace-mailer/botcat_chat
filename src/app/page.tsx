@@ -13,13 +13,13 @@ export default function Home() {
       attachmentId: att.attachmentId || "",
       messageId: att.messageId || "",
       kind: att.kind || "user_upload",
-      fileName: att.fileName || null,
-      mimeType: att.mimeType || null,
-      fileSizeBytes: att.fileSizeBytes || null,
-      pageCount: att.pageCount || null,
-      originalUrl: att.originalUrl || null,
-      blobUrlOriginal: att.blobUrlOriginal || null,
-      blobUrlPreview: att.blobUrlPreview || att.blobUrlOriginal || null,
+      fileName: att.fileName ?? null,
+      mimeType: att.mimeType ?? null,
+      fileSizeBytes: att.fileSizeBytes ?? null,
+      pageCount: att.pageCount ?? null,
+      originalUrl: att.originalUrl ?? null,
+      blobUrlOriginal: att.blobUrlOriginal ?? null,
+      blobUrlPreview: att.blobUrlPreview ?? att.blobUrlOriginal ?? null,
     };
   }
 
@@ -27,7 +27,6 @@ export default function Home() {
     setError(null);
     setIsTyping(true);
     const token = process.env.NEXT_PUBLIC_ACCESS_TOKEN || "";
-
     try {
       setMessages((prev) => [
         ...prev,
