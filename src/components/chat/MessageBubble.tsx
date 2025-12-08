@@ -16,8 +16,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ author, text, attachments
       {attachments && attachments.length > 0 && (
         <div className="attachments-list">
           {attachments.map((att) => {
-            // Check for image attachments safely
-            if (att.mimeType && att.mimeType.startsWith("image/")) {
+            // Check for image attachments safely using optional chaining
+            if (att.mimeType?.startsWith("image/")) {
               return att.blobUrlPreview ? (
                 <a key={att.attachmentId} href={att.blobUrlOriginal || att.originalUrl} target="_blank" rel="noopener noreferrer">
                   <img src={att.blobUrlPreview} alt="attachment preview" />
