@@ -19,12 +19,12 @@ export default function Home() {
         {
           author: "user",
           text: message,
-          attachments: attachments?.map(att => ({
+          attachments: attachments ? attachments.map(att => ({
             fileName: att.fileName,
             blobUrlOriginal: att.blobUrlOriginal,
             mimeType: att.mimeType,
             fileSizeBytes: att.fileSizeBytes
-          })),
+          })) : []
         },
       ]);
 
@@ -48,7 +48,7 @@ export default function Home() {
         {
           author: "bot",
           text: data.reply,
-          attachments: data.attachments,
+          attachments: data.attachments || []
         },
       ]);
     } catch (e: any) {
