@@ -1204,7 +1204,7 @@ BotCat:
 
 Чат доступен только по адресу:
 
-\`\`\`https://fairyplace.net/chat\`\`\`
+\`\`\`https://fairyplace.net\`\`\`
 
 и как приложение (PWA).
 
