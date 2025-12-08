@@ -20,10 +20,8 @@ export default function Home() {
           author: "user",
           text: message,
           attachments: attachments?.map(att => ({
-            fileName: att.fileName,
-            blobUrlOriginal: att.blobUrlOriginal,
-            mimeType: att.mimeType,
-            fileSizeBytes: att.fileSizeBytes
+            ...att,
+            kind: "user_upload",
           })),
         },
       ]);
@@ -48,7 +46,10 @@ export default function Home() {
         {
           author: "bot",
           text: data.reply,
-          attachments: data.attachments,
+          attachments: data.attachments?.map((att: any) => ({
+            ...att,
+            kind: "bot_generated",
+          })),
         },
       ]);
     } catch (e: any) {
