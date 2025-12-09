@@ -1,84 +1,57 @@
-"use client";
-import Image from "next/image";
-import React, { useState } from "react";
+import React from 'react';
 
-export default function Home() {
-  // В дальнейшем сюда добавится стэйт сообщений, sidebar, реальный чат и т.д.
-  const [_, setStub] = useState(false);
-
+export default function Page() {
   return (
-    <div
-      className="min-h-screen bg-background flex text-foreground transition-colors duration-300"
-    >
-      {/* Sidebar placeholder */}
-      <aside className="hidden md:flex flex-col gap-2 w-[260px] bg-muted border-r border-border py-5 px-4">
-        {/* Логотип */}
-        <div className="flex flex-col items-center mb-8 select-none">
-          <Image
-            src="/BotCat_Portrait.png"
-            alt="BotCat Consultant Logo"
-            width={72}
-            height={72}
-            className="rounded-full shadow border border-border bg-background"
-            draggable={false}
-            priority
-          />
-          <span className="mt-3 text-lg font-bold tracking-tight text-primary uppercase select-none">
-            BotCat™
-          </span>
-          <span className="text-[0.89rem] tracking-wide text-muted-foreground font-medium">
-            Consultant
-          </span>
+    <div className="min-h-screen bg-background flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-muted border-r border-border hidden md:flex flex-col">
+        <div className="p-4 flex items-center justify-center">
+          <img src="/BotCat_Portrait.png" alt="BotCat Logo" className="h-12 w-12" />
         </div>
-        <button
-          type="button"
-          className="w-full py-2 rounded-lg bg-primary text-primary-foreground shadow hover:bg-accent hover:text-accent-foreground transition"
-        >
+        <button className="m-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition">
           New Chat
         </button>
-        {/* В будущем список чатов/настройки */}
+        <div className="flex-1 p-4 overflow-auto">
+          {/* Chat list placeholder */}
+          <p className="text-muted-foreground">No chats yet</p>
+        </div>
       </aside>
-      {/* Центр с чатом */}
-      <div className="flex-1 flex flex-col items-stretch h-screen">
-        {/* Верхний бар только на мобильных - фирменный стиль */}
-        <header className="md:hidden flex items-center justify-between h-14 px-2 border-b border-border bg-muted/80 backdrop-blur sticky top-0 z-20">
-          <span className="flex items-center gap-2 font-bold text-primary text-base">
-            <Image src="/BotCat_Portrait.png" alt="BotCat Logo" width={32} height={32} className="rounded" />
-            BotCat™
-          </span>
-          <button
-            type="button"
-            className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 font-medium hover:bg-accent hover:text-accent-foreground"
-          >
-            New Chat
-          </button>
+
+      {/* Main chat area */}
+      <main className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="p-4 border-b border-border flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-foreground">Chat</h1>
         </header>
-        {/* Центрированный приветственный экран */}
-        <main className="flex-1 flex flex-col justify-center items-center">
-          <Image
-            src="/BotCat_Portrait.png"
-            alt="BotCat Logo Large"
-            width={88}
-            height={88}
-            className="rounded-full border border-border mb-3 shadow-lg bg-background"
-            draggable={false}
-            priority
-          />
-          <h1 className="text-2xl md:text-3xl font-bold mt-1 mb-2 select-none tracking-tight">
-            Welcome to BotCat™ Consultant
-          </h1>
-          <p className="text-muted-foreground text-base md:text-lg max-w-xl text-center mb-6">
-            Your private, AI-powered assistant for business, creativity and life.<br />
-            Start a new chat to explore all BotCat™ features or continue your previous conversations.
-          </p>
-          <button
-            type="button"
-            className="mt-2 px-6 py-3 rounded-lg bg-primary text-primary-foreground shadow hover:bg-accent hover:text-accent-foreground transition text-lg font-semibold"
-          >
-            New Chat
-          </button>
-        </main>
-      </div>
+        
+        {/* Chat content */}
+        <div className="flex-1 p-4 overflow-auto bg-background">
+          <p className="text-muted-foreground">Welcome to BotCat Consultant v1.0</p>
+          {/* Placeholder message bubbles */}
+          <div className="mt-4 space-y-2">
+            <div className="max-w-md bg-chat-bot-bg text-foreground p-3 rounded-lg">
+              Hello, how can I help you?
+            </div>
+            <div className="max-w-md self-end bg-chat-user-bg text-primary-foreground p-3 rounded-lg">
+              I need assistance with my project.
+            </div>
+          </div>
+        </div>
+
+        {/* Message input */}
+        <footer className="p-4 border-t border-border">
+          <form className="flex items-center space-x-2">
+            <input
+              type="text"
+              placeholder="Type a message..."
+              className="flex-1 px-3 py-2 border border-border rounded-lg bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition">
+              Send
+            </button>
+          </form>
+        </footer>
+      </main>
     </div>
   );
 }
