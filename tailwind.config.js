@@ -1,4 +1,5 @@
 /** @type {import('tailwindcss').Config} */
+
 module.exports = {
   darkMode: ["class"],
   content: [
@@ -18,19 +19,38 @@ module.exports = {
     },
     extend: {
       colors: {
+        // Базовые токены (в стиле shadcn)
         border: "var(--border)",
         input: "var(--input)",
         ring: "var(--ring)",
         background: "var(--background)",
         foreground: "var(--foreground)",
-        primary: { DEFAULT: "var(--primary)", foreground: "var(--primary-foreground)" },
-        secondary: { DEFAULT: "var(--secondary)", foreground: "var(--secondary-foreground)" },
-        accent: { DEFAULT: "var(--accent)", foreground: "var(--accent-foreground)" },
-        muted: { DEFAULT: "var(--muted)", foreground: "var(--muted-foreground)" },
-        destructive: { DEFAULT: "var(--destructive)", foreground: "var(--destructive-foreground)" },
+        primary: {
+          DEFAULT: "var(--primary)",
+          foreground: "var(--primary-foreground)",
+        },
+        secondary: {
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
+        },
+        accent: {
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
+        },
+        muted: {
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
+        },
+        destructive: {
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
+        },
+        // Статусы BotCat
         success: "var(--success)",
         warning: "var(--warning)",
         info: "var(--info)",
+        
+        // Дополнительно для чата
         "chat-user-bg": "var(--chat-user-bg)",
         "chat-bot-bg": "var(--chat-bot-bg)",
       },
