@@ -14,9 +14,16 @@
     "prisma": "^7.1.0"
   },
   "devDependencies": {
-    "tailwindcss": "^3.3.0",
-    "postcss": "^8.4.18",
-    "autoprefixer": "^10.4.12",
-    "tailwindcss-animate": "^1.0.0"
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.7",
+    "tailwindcss": "^4",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5"
+>>>>>>> de31eb0 (Install tailwindcss-animate)
   }
 }
