@@ -1,22 +1,52 @@
-@import "tailwindcss";
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Light theme — BotCat Consultant */
+  --background: #f7f7f5;
+  --foreground: #1c1c1a;
+  --muted: #efede8;
+  --muted-foreground: #4a4a47;
+  --border: #d9d7d2;
+  --input: #d9d7d2;
+  --ring: #3da4a1;
+  --primary: #3da4a1;
+  --primary-foreground: #ffffff;
+  --secondary: #4e6e81;
+  --secondary-foreground: #ffffff;
+  --accent: #c8794d;
+  --accent-foreground: #ffffff;
+  --destructive: #d95c4a;
+  --destructive-foreground: #ffffff;
+  --success: #3faf72;
+  --warning: #efb55a;
+  --info: #5aa7c8;
+  --chat-user-bg: #3da4a1;
+  --chat-bot-bg: #efede8;
 }
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  /* Dark theme — BotCat Consultant */
+  --background: #181a1a;
+  --foreground: #ededeb;
+  --muted: #202322;
+  --muted-foreground: #c7c7c4;
+  --border: #2a2d2c;
+  --input: #2a2d2c;
+  --ring: #5cc6c3;
+  --primary: #5cc6c3;
+  --primary-foreground: #181a1a;
+  --secondary: #6f8fa3;
+  --secondary-foreground: #181a1a;
+  --accent: #e0915e;
+  --accent-foreground: #181a1a;
+  --destructive: #d95c4a;
+  --destructive-foreground: #181a1a;
+  --success: #3faf72;
+  --warning: #efb55a;
+  --info: #5aa7c8;
+  --chat-user-bg: #5cc6c3;
+  --chat-bot-bg: #202322;
 }
 
 body {
