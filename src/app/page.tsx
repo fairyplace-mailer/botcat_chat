@@ -1,117 +1,57 @@
-"use client";
-import React, { useState } from "react";
-import ChatWindow, { Message } from "../components/chat/ChatWindow";
-import MessageInput, { MessageInputData, BotCatAttachment } from "../components/chat/MessageInput";
+import React from 'react';
 
-export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function normalizeAttachment(att: Partial<BotCatAttachment>): BotCatAttachment {
-    return {
-      attachmentId: att.attachmentId || "",
-      messageId: att.messageId || "",
-      kind: att.kind || "user_upload",
-      fileName: att.fileName ?? null,
-      mimeType: att.mimeType ?? null,
-      fileSizeBytes: att.fileSizeBytes ?? null,
-      pageCount: att.pageCount ?? null,
-      originalUrl: att.originalUrl ?? null,
-      blobUrlOriginal: att.blobUrlOriginal ?? null,
-      blobUrlPreview: att.blobUrlPreview ?? att.blobUrlOriginal ?? null,
-    };
-  }
-
-  async function sendMessage({ message, attachments }: MessageInputData) {
-    setError(null);
-    setIsTyping(true);
-    const token = process.env.NEXT_PUBLIC_ACCESS_TOKEN || "";
-    try {
-      setMessages((prev) => [
-        ...prev,
-        {
-          author: "user",
-          text: message,
-          attachments: attachments ? attachments.map(normalizeAttachment) : [],
-        },
-      ]);
-
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Access-Token": token,
-        },
-        body: JSON.stringify({ message, attachments }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          author: "bot",
-          text: data.reply,
-          attachments: data.attachments ? data.attachments.map(normalizeAttachment) : [],
-        },
-      ]);
-    } catch (e: any) {
-      setError(e.message || "Unknown error");
-    } finally {
-      setIsTyping(false);
-    }
-  }
-
-  function handleNewChat() {
-    setMessages([]);
-    setError(null);
-  }
-
+export default function Page() {
   return (
-    <main
-      className="chat-page"
-      style={{ display: "flex", flexDirection: "column", height: "100vh" }}
-    >
-      <div
-        style={{
-          padding: "10px",
-          borderBottom: "1px solid #eee",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ margin: 0, fontWeight: 600, fontSize: "1.25rem" }}>BotCat Chat</h1>
-        <button
-          onClick={handleNewChat}
-          style={{
-            backgroundColor: "#10a37f",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            padding: "6px 12px",
-            cursor: "pointer",
-          }}
-        >
-          Новый диалог
-        </button>
-      </div>
-      <ChatWindow messages={messages} isTyping={isTyping} />
-      {error && (
-        <div
-          className="chat-error"
-          role="alert"
-          style={{ color: "red", padding: "8px", textAlign: "center" }}
-        >
-          {error}
+    <div className="min-h-screen bg-background flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-muted border-r border-border hidden md:flex flex-col">
+        <div className="p-4 flex items-center justify-center">
+          <img src="/BotCat_Portrait.png" alt="BotCat Logo" className="h-12 w-12" />
         </div>
-      )}
-      <MessageInput onSend={sendMessage} />
-    </main>
+        <button className="m-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition">
+          New Chat
+        </button>
+        <div className="flex-1 p-4 overflow-auto">
+          {/* Chat list placeholder */}
+          <p className="text-muted-foreground">No chats yet</p>
+        </div>
+      </aside>
+
+      {/* Main chat area */}
+      <main className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="p-4 border-b border-border flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-foreground">Chat</h1>
+        </header>
+        
+        {/* Chat content */}
+        <div className="flex-1 p-4 overflow-auto bg-background">
+          <p className="text-muted-foreground">Welcome to BotCat Consultant v1.0</p>
+          {/* Placeholder message bubbles */}
+          <div className="mt-4 space-y-2">
+            <div className="max-w-md bg-chat-bot-bg text-foreground p-3 rounded-lg">
+              Hello, how can I help you?
+            </div>
+            <div className="max-w-md self-end bg-chat-user-bg text-primary-foreground p-3 rounded-lg">
+              I need assistance with my project.
+            </div>
+          </div>
+        </div>
+
+        {/* Message input */}
+        <footer className="p-4 border-t border-border">
+          <form className="flex items-center space-x-2">
+            <input
+              type="text"
+              placeholder="Type a message..."
+              className="flex-1 px-3 py-2 border border-border rounded-lg bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition">
+              Send
+            </button>
+          </form>
+        </footer>
+      </main>
+    </div>
   );
 }
