@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-      - feature/message-input-attachments
+      - feature/ui
   pull_request:
     branches:
       - main
-      - feature/message-input-attachments
+      - feature/ui
   workflow_dispatch:
 
 jobs:
