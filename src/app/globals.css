@@ -1,9 +1,9 @@
-@import "tailwindcss/base";
-@import "tailwindcss/components";
-@import "tailwindcss/utilities";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/* Light theme – BotCat Consultant */
 :root {
-  /* Light theme — BotCat Consultant */
   --background: #f7f7f5;
   --foreground: #1c1c1a;
   --muted: #efede8;
@@ -22,11 +22,14 @@
   --success: #3faf72;
   --warning: #efb55a;
   --info: #5aa7c8;
+
+  /* Chat bubbles */
   --chat-user-bg: #3da4a1;
   --chat-bot-bg: #efede8;
 }
+
+/* Dark theme – BotCat Consultant */
 .dark {
-  /* Dark theme — BotCat Consultant */
   --background: #181a1a;
   --foreground: #ededeb;
   --muted: #202322;
@@ -45,12 +48,8 @@
   --success: #3faf72;
   --warning: #efb55a;
   --info: #5aa7c8;
+
+  /* Chat bubbles */
   --chat-user-bg: #5cc6c3;
   --chat-bot-bg: #202322;
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
