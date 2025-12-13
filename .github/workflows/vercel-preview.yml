@@ -1,0 +1,147 @@
+name: Vercel Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: vercel-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-and-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel preview deployment
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "Missing VERCEL_TOKEN" >&2
+            exit 1
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Missing VERCEL_PROJECT_ID" >&2
+            exit 1
+          fi
+
+          payload=$(jq -n \
+            --arg name "preview-${SHA}" \
+            --arg target "preview" \
+            --arg projectId "$VERCEL_PROJECT_ID" \
+            --arg sha "$SHA" \
+            '{name:$name, target:$target, projectId:$projectId, gitSource:{type:"github", sha:$sha}}')
+
+          url="https://api.vercel.com/v13/deployments"
+          if [ -n "$VERCEL_TEAM_ID" ]; then
+            url="$url?teamId=$VERCEL_TEAM_ID"
+          fi
+
+          echo "Creating deployment via $url" >&2
+          resp=$(curl -fsS -X POST "$url" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+
+          echo "$resp" > deployment.json
+          id=$(jq -r '.id' deployment.json)
+          dep_url=$(jq -r '.url // empty' deployment.json)
+
+          if [ -z "$id" ] || [ "$id" = "null" ]; then
+            echo "Failed to create deployment. Response:" >&2
+            cat deployment.json >&2
+            exit 1
+          fi
+
+          echo "deployment_id=${id}" >> $GITHUB_OUTPUT
+          echo "deployment_url=${dep_url}" >> $GITHUB_OUTPUT
+
+      - name: Poll Vercel deployment status
+        id: poll
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          DEPLOYMENT_ID: ${{ steps.deploy.outputs.deployment_id }}
+        run: |
+          url="https://api.vercel.com/v13/deployments/${DEPLOYMENT_ID}"
+          if [ -n "$VERCEL_TEAM_ID" ]; then
+            url="$url?teamId=$VERCEL_TEAM_ID"
+          fi
+
+          for i in $(seq 1 60); do
+            resp=$(curl -fsS -X GET "$url" -H "Authorization: Bearer $VERCEL_TOKEN")
+            echo "$resp" > status.json
+
+            state=$(jq -r '.readyState // .state // .status // empty' status.json)
+            dep_url=$(jq -r '.url // empty' status.json)
+
+            if [ -n "$dep_url" ]; then
+              echo "deployment_url=${dep_url}" >> $GITHUB_OUTPUT
+            fi
+
+            if [ "$state" = "READY" ] || [ "$state" = "ready" ]; then
+              echo "state=ready" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            if [ "$state" = "ERROR" ] || [ "$state" = "error" ]; then
+              echo "state=error" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "state=timeout" >> $GITHUB_OUTPUT
+
+      - name: Upsert PR comment with preview URL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          STATE: ${{ steps.poll.outputs.state }}
+          DEPLOYMENT_ID: ${{ steps.deploy.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.poll.outputs.deployment_url || steps.deploy.outputs.deployment_url }}
+        run: |
+          marker="<!-- botcow:vercel-preview -->"
+
+          preview=""
+          if [ -n "$DEPLOYMENT_URL" ]; then
+            if echo "$DEPLOYMENT_URL" | grep -q '^https\?://'; then
+              preview="$DEPLOYMENT_URL"
+            else
+              preview="https://${DEPLOYMENT_URL}"
+            fi
+          fi
+
+          details="https://vercel.com/deployments/${DEPLOYMENT_ID}"
+
+          body=$(cat <<EOF
+          ${marker}
+          **Vercel Preview**
+
+          - Status: \\`${STATE}\\`
+          - Preview: ${preview}
+          - Details: ${details}
+          - Commit: ${SHA}
+          EOF
+          )
+
+          comments=$(gh api -H "Accept: application/vnd.github+json" "/repos/${REPO}/issues/${PR_NUMBER}/comments?per_page=100")
+          existing_id=$(echo "$comments" | jq -r --arg m "$marker" '.[] | select(.body | contains($m)) | .id' | head -n 1)
+
+          if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
+            gh api -X PATCH -H "Accept: application/vnd.github+json" "/repos/${REPO}/issues/comments/${existing_id}" -f body="$body" > /dev/null
+            echo "Updated comment id=${existing_id} on PR #${PR_NUMBER}."
+          else
+            gh api -X POST -H "Accept: application/vnd.github+json" "/repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="$body" > /dev/null
+            echo "Created comment on PR #${PR_NUMBER}."
+          fi
