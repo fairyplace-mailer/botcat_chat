@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Vercel Preview links in PRs
+
+This repo includes a GitHub Actions workflow that automatically upserts a PR comment with Vercel deployment status + preview URL.
+
+See: [`docs/vercel-preview.md`](docs/vercel-preview.md)
+
 ## Getting Started
 
 First, run the development server:
