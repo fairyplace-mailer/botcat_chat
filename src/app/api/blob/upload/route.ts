@@ -9,7 +9,10 @@ import { handleUpload } from "@vercel/blob/client";
 //   limits are effectively Vercel/runtime limits.
 
 export async function POST(request: Request): Promise<Response> {
+  const body = await request.json();
+
   const result = await handleUpload({
+    body,
     request,
 
     // Contract (v2): must accept (pathname, clientPayload, multipart) and return
