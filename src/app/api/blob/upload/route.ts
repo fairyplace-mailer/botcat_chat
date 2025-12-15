@@ -18,7 +18,7 @@ const ALLOWED_CONTENT_TYPES = [
 ];
 
 export async function POST(request: Request): Promise<Response> {
-  return handleUpload({
+  const result = await handleUpload({
     request,
     onBeforeGenerateToken: async (pathname, clientPayload) => {
       const contentType =
@@ -46,4 +46,8 @@ export async function POST(request: Request): Promise<Response> {
       // Stage v1.0: no-op. We don't persist upload metadata in DB.
     },
   });
+
+  // handleUpload() returns a typed union that isn't a Fetch Response.
+  // Next route handlers must return Response, so we wrap it.
+  return Response.json(result);
 }
