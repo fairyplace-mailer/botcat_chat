@@ -2,44 +2,25 @@ import { handleUpload } from "@vercel/blob/client";
 
 // Vercel Blob: generate a client token for direct uploads.
 // Docs: https://vercel.com/docs/storage/vercel-blob
-
-// Stage v1.0: We accept files that OpenAI can reasonably consume.
-// No size/count limits are enforced here beyond what Vercel Hobby/runtime allows.
-// NOTE: This list is intentionally permissive per updated spec.
-const ALLOWED_CONTENT_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-  "text/csv",
-  "text/plain",
-  "application/json",
-];
+//
+// Stage v1.0 per spec:
+// - The browser uploads directly to Blob.
+// - We keep this endpoint permissive: OpenAI may accept many formats, and v1.0
+//   limits are effectively Vercel/runtime limits.
 
 export async function POST(request: Request): Promise<Response> {
   const result = await handleUpload({
     request,
-    onBeforeGenerateToken: async (pathname, clientPayload) => {
-      const contentType =
-        typeof (clientPayload as any)?.contentType === "string"
-          ? ((clientPayload as any).contentType as string)
-          : undefined;
 
-      if (contentType && !ALLOWED_CONTENT_TYPES.includes(contentType)) {
-        return {
-          allowed: false,
-          error: `Content-Type not allowed: ${contentType}`,
-        } as const;
-      }
-
+    // Contract (v2): must accept (pathname, clientPayload, multipart) and return
+    // token options (not "allowed: true/false").
+    onBeforeGenerateToken: async (pathname, _clientPayload, _multipart) => {
       return {
-        allowed: true,
         addRandomSuffix: true,
-        tokenPayload: {
-          pathname,
-        },
-      } as const;
+        // Must be a string (it will be returned back to onUploadCompleted).
+        // We keep it minimal.
+        tokenPayload: pathname,
+      };
     },
 
     onUploadCompleted: async () => {
