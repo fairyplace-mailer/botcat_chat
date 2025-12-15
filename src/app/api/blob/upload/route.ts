@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { handleUploadRoute } from "@vercel/blob/client";
 
 // Vercel Blob: generate a client token for direct uploads.
 // Docs: https://vercel.com/docs/storage/vercel-blob
-import { handleUpload } from "@vercel/blob";
+//
+// Note: handleUploadRoute is the supported helper for Next.js route handlers.
 
 // Stage v1.0: We accept files that OpenAI can reasonably consume.
 // No size/count limits are enforced here beyond what Vercel Hobby/runtime allows.
@@ -18,43 +19,31 @@ const ALLOWED_CONTENT_TYPES = [
   "application/json",
 ];
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json().catch(() => ({}));
+export const POST = handleUploadRoute({
+  onBeforeGenerateToken: async (pathname, clientPayload) => {
+    const contentType =
+      typeof (clientPayload as any)?.contentType === "string"
+        ? ((clientPayload as any).contentType as string)
+        : undefined;
 
-    // Optional client hinting; @vercel/blob's handleUpload validates and signs.
-    // We keep the interface simple for the UI: it can pass { filename, contentType }.
-    const filename = typeof body?.filename === "string" ? body.filename : "upload";
-    const contentType = typeof body?.contentType === "string" ? body.contentType : undefined;
+    if (contentType && !ALLOWED_CONTENT_TYPES.includes(contentType)) {
+      return {
+        allowed: false,
+        error: `Content-Type not allowed: ${contentType}`,
+      } as const;
+    }
 
-    const json = await handleUpload({
-      request,
-      onBeforeGenerateToken: async () => {
-        if (contentType && !ALLOWED_CONTENT_TYPES.includes(contentType)) {
-          return {
-            allowed: false,
-            error: `Content-Type not allowed: ${contentType}`,
-          } as const;
-        }
-
-        return {
-          allowed: true,
-          tokenPayload: {
-            filename,
-          },
-        } as const;
+    // We don't restrict file names here; Vercel Blob will add a random suffix.
+    return {
+      allowed: true,
+      addRandomSuffix: true,
+      tokenPayload: {
+        pathname,
       },
-      onUploadCompleted: async () => {
-        // Intentionally no-op for stage v1.0.
-        // (No DB persistence of uploads at this stage.)
-      },
-    });
+    } as const;
+  },
 
-    return NextResponse.json(json);
-  } catch (err) {
-    return NextResponse.json(
-      { error: "Upload token error", detail: String(err) },
-      { status: 500 },
-    );
-  }
-}
+  onUploadCompleted: async () => {
+    // Stage v1.0: no-op. We don't persist upload metadata in DB.
+  },
+});
