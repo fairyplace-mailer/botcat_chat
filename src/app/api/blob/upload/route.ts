@@ -1,4 +1,4 @@
-import { handleUpload } from "@vercel/blob";
+import { handleUpload } from "@vercel/blob/client";
 
 // Vercel Blob: generate a client token for direct uploads.
 // Docs: https://vercel.com/docs/storage/vercel-blob
