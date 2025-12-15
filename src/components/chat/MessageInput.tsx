@@ -1,4 +1,5 @@
-import React, { useState, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { BotCatAttachment } from "@/lib/botcat-attachment";
 
 export type { BotCatAttachment };
@@ -14,106 +15,110 @@ export interface MessageInputProps {
   loading?: boolean;
 }
 
-// Допустимые mime-типы по ТЗ
+// Stage v1.0: allow common file types that OpenAI can consume.
+// We keep it relatively permissive per spec.
 const ACCEPT_MIME = [
-  "image/png", "image/jpeg", "image/webp", "image/gif",
-  "audio/mpeg", "audio/ogg", "audio/wav",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
   "application/pdf",
-  "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "text/plain", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  "text/csv",
+  "text/plain",
+  "application/json",
 ];
-const MAX_SAFE_SIZE = 512 * 1024 * 1024; // 512 MB предохранитель
+
+type UploadingItem = {
+  id: string;
+  name: string;
+  type: string;
+  progress: number;
+};
 
 export function MessageInput(props: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<BotCatAttachment[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<UploadingItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Drag-n-drop
+  const isBusy = props.disabled || props.loading || uploading.length > 0;
+
+  const acceptAttr = useMemo(() => ACCEPT_MIME.join(","), []);
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
-    if (props.disabled || props.loading) return;
+    if (isBusy) return;
     const files = Array.from(e.dataTransfer.files);
-    handleFiles(files);
+    void handleFiles(files);
   }
+
   function onDragOver(e: React.DragEvent) {
     e.preventDefault();
   }
 
-  // Upload logic
   async function handleFiles(files: File[]) {
     setError(null);
-    setUploading(true);
+
     for (const file of files) {
-      if (file.size > MAX_SAFE_SIZE) {
-        setError(`Файл ${file.name} превышает лимит 512 МБ`);
+      if (!file.type || !ACCEPT_MIME.includes(file.type)) {
+        setError(`File type not allowed: ${file.name} (${file.type || "unknown"})`);
         continue;
       }
-      if (!ACCEPT_MIME.includes(file.type)) {
-        setError(`Файл ${file.name} не поддерживается (${file.type})`);
-        continue;
-      }
+
+      const uploadId = crypto.randomUUID();
+      setUploading((prev) => [
+        ...prev,
+        { id: uploadId, name: file.name, type: file.type, progress: 0 },
+      ]);
+
       try {
-        // 1. Получить uploadUrl с backend
-        const res = await fetch("/api/blob/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileName: file.name,
-            mimeType: file.type,
-            fileSizeBytes: file.size
-          })
+        const blob = await upload(file.name, file, {
+          access: "public",
+          handleUploadUrl: "/api/blob/upload",
+          contentType: file.type,
+          // Best-effort UI progress.
+          onUploadProgress: (p) => {
+            setUploading((prev) =>
+              prev.map((u) => (u.id === uploadId ? { ...u, progress: p.percentage } : u)),
+            );
+          },
         });
-        if (!res.ok) {
-          setError(`Ошибка подготовки upload для ${file.name}`);
-          continue;
-        }
-        const { uploadUrl, blobUrl } = await res.json();
 
-        // 2. Загрузка файла на uploadUrl
-        const uploadRes = await fetch(uploadUrl, {
-          method: "PUT",
-          body: file,
-          headers: { "Content-Type": file.type },
-        });
-        if (!uploadRes.ok) {
-          setError(`Ошибка загрузки файла ${file.name}`);
-          continue;
-        }
-
-        setAttachments(a => [
-          ...a,
+        setAttachments((prev) => [
+          ...prev,
           {
             attachmentId: crypto.randomUUID(),
-            messageId: "",
+            // Message id is created server-side; for UI we keep empty.
+            messageId: "ui-memory",
             kind: "user_upload",
             fileName: file.name || null,
             mimeType: file.type || null,
             fileSizeBytes: file.size || null,
             pageCount: null,
-            originalUrl: blobUrl,
-            blobUrlOriginal: blobUrl,
+            originalUrl: blob.url,
+            blobUrlOriginal: blob.url,
             blobUrlPreview: null,
-          } satisfies BotCatAttachment
+          },
         ]);
-      } catch (err) {
-        setError(`Ошибка загрузки файла ${file.name}`);
+      } catch (e: any) {
+        setError(`Upload failed: ${file.name}`);
+      } finally {
+        setUploading((prev) => prev.filter((u) => u.id !== uploadId));
       }
     }
-    setUploading(false);
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files) return;
     const files = Array.from(e.target.files);
-    handleFiles(files);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    void handleFiles(files);
   }
 
   function removeAttachment(idx: number) {
-    setAttachments(a => a.filter((_, i) => i !== idx));
+    setAttachments((a) => a.filter((_, i) => i !== idx));
   }
 
   function onSendClick() {
@@ -121,52 +126,80 @@ export function MessageInput(props: MessageInputProps) {
     props.onSend({ message, attachments });
     setMessage("");
     setAttachments([]);
+    setError(null);
   }
 
   return (
     <div className="message-input_wrapper" onDrop={onDrop} onDragOver={onDragOver}>
       <textarea
         className="message-input_textarea"
-        placeholder="Введите сообщение..."
+        placeholder="Type a message…"
         value={message}
-        disabled={uploading || props.disabled || props.loading}
-        onChange={e => setMessage(e.target.value)}
+        disabled={isBusy}
+        onChange={(e) => setMessage(e.target.value)}
         rows={1}
         style={{ resize: "vertical" }}
       />
+
       <input
         type="file"
         ref={fileInputRef}
         multiple
-        accept={ACCEPT_MIME.join(",")}
+        accept={acceptAttr}
         style={{ display: "none" }}
         onChange={onFileChange}
-        disabled={uploading || props.disabled || props.loading}
+        disabled={isBusy}
       />
+
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        disabled={uploading || props.disabled || props.loading}
+        disabled={isBusy}
+        aria-label="Attach files"
       >
-        📎
+        +
       </button>
+
       <button
         type="button"
         onClick={onSendClick}
-        disabled={(uploading || props.disabled || props.loading) || (!message.trim() && attachments.length === 0)}
+        disabled={isBusy || (!message.trim() && attachments.length === 0)}
+        aria-label="Send message"
       >
-        ⬆️
+        Send
       </button>
-      {error && <div className="message-input_error">{error}</div>}
-      <div className="message-input_attachments">
-        {attachments.map((att, idx) => (
-          <div className="message-input_attachment" key={att.attachmentId}>
-            <span>{att.fileName} ({att.mimeType})</span>
-            <button type="button" onClick={() => removeAttachment(idx)} disabled={uploading}>✖️</button>
-          </div>
-        ))}
-      </div>
-      {uploading && <div className="message-input_uploading">Загружаем файл…</div>}
+
+      {error ? <div className="message-input_error">{error}</div> : null}
+
+      {uploading.length > 0 ? (
+        <div className="message-input_uploading">
+          {uploading.map((u) => (
+            <div key={u.id}>
+              Uploading {u.name}… {Math.round(u.progress)}%
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {attachments.length > 0 ? (
+        <div className="message-input_attachments">
+          {attachments.map((att, idx) => (
+            <div className="message-input_attachment" key={att.attachmentId}>
+              <a
+                href={att.blobUrlOriginal ?? att.originalUrl ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {att.fileName || "attachment"}
+              </a>
+              {att.mimeType ? <span> ({att.mimeType})</span> : null}
+              <button type="button" onClick={() => removeAttachment(idx)} disabled={isBusy}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
