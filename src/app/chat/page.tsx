@@ -30,9 +30,10 @@ type SseErrorEvent = {
 };
 
 function parseSse(streamText: string) {
-  // minimal SSE parser for events in the form:
-  // event: name\n
-data: {...}\n\n
+  // Minimal SSE parser. Expected frames look like:
+  // event: meta\n
+  // data: {...json...}\n
+  // \n
   const messages: Array<{ event: string; data: any }> = [];
   const chunks = streamText.split("\n\n");
   for (const chunk of chunks) {
@@ -113,7 +114,6 @@ export default function ChatV1Page() {
         body: JSON.stringify({
           chatName,
           message: data.message,
-          // stage 1: attachments are ignored by backend for now; we still store them in UI
           attachments: data.attachments ?? [],
           client: {
             sessionId: "ui-memory",
