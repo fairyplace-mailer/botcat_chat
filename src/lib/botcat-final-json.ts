@@ -8,12 +8,12 @@ import {
 } from "@/lib/botcat-attachment";
 
 /**
- * Zod-схемы под итоговый JSON BotCat → backend.
+ * Zod-   BotCat  backend.
  *
- * ВАЖНО: структура должна строго соответствовать актуальному ТЗ (docs/spec.md).
+ * :      (docs/spec.md).
  */
 
-// --- Базовые под-схемы ---
+// --- - ---
 
 export const BotCatMessageRoleSchema = z.enum(["User", "BotCat"]);
 
@@ -31,21 +31,24 @@ export type BotCatMessage = z.infer<typeof BotCatMessageSchema>;
 
 export const BotCatTranslatedMessageSchema = z.object({
   messageId: z.string().min(1),
+  role: BotCatMessageRoleSchema,
   contentTranslated_md: z.string(),
-  language: z.string().min(2).max(5), // "ru" и пр.
 });
 
 export type BotCatTranslatedMessage = z.infer<typeof BotCatTranslatedMessageSchema>;
 
-// --- Итоговый JSON ---
+// ---  JSON ---
 
 export const BotCatFinalJsonSchema = z.object({
+  // IMPORTANT: chatName        /.
+  chatName: z.string().min(1),
+
   languageOriginal: z.string().min(2).max(5),
+  // Per MANDATORY: language is always "ru" (language of translatedMessages).
+  language: z.literal("ru"),
 
   messages: z.array(BotCatMessageSchema),
-
   translatedMessages: z.array(BotCatTranslatedMessageSchema),
-
   attachments: z.array(BotCatAttachmentSchema),
 
   preamble_md: z.string(),
@@ -57,7 +60,7 @@ export const BotCatFinalJsonSchema = z.object({
 
 export type BotCatFinalJson = z.infer<typeof BotCatFinalJsonSchema>;
 
-// --- Опции сборки финального JSON ---
+// ---    JSON ---
 
 export type BuildFinalJsonOptions = {
   preamble_md?: string;
@@ -66,9 +69,7 @@ export type BuildFinalJsonOptions = {
 };
 
 /**
- * Сборка итогового JSON по chatName из БД.
- *
- * Примечание: chatName используется только как ключ выборки, но НЕ входит в итоговый JSON.
+ *   JSON  chatName  .
  */
 export async function buildFinalJsonByChatName(
   chatName: string,
@@ -88,7 +89,6 @@ export async function buildFinalJsonByChatName(
     throw new Error(`Conversation with chatName="${chatName}" not found`);
   }
 
-  // messages[]
   const messages: BotCatMessage[] = (conversation.messages as any[]).map((m) => ({
     messageId: m.message_id,
     role: m.role as BotCatMessage["role"],
@@ -102,20 +102,18 @@ export async function buildFinalJsonByChatName(
   const languageOriginal =
     (conversation.language_original || "und").trim() || "und";
 
-  // translatedMessages[]
   const translatedMessages: BotCatTranslatedMessage[] = (conversation.messages as any[]).map(
     (m) => {
       const translatedText = m.content_translated_md ?? m.content_original_md ?? "";
 
       return {
         messageId: m.message_id,
+        role: m.role as BotCatMessage["role"],
         contentTranslated_md: translatedText,
-        language: "ru",
       };
     }
   );
 
-  // attachments[]
   const attachments: BotCatAttachment[] = (conversation.attachments as any[]).map(
     (a) => ({
       attachmentId: a.id,
@@ -139,7 +137,10 @@ export async function buildFinalJsonByChatName(
   const sendToInternal = conversation.send_to_internal;
 
   const draft: BotCatFinalJson = {
+    chatName,
+
     languageOriginal,
+    language: "ru",
 
     messages,
     translatedMessages,
