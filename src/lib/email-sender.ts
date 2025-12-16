@@ -1,178 +1,113 @@
+import { Resend } from "resend";
 import type { BotCatFinalJson } from "@/lib/botcat-final-json";
-import type { UploadPdfResult } from "@/lib/google/drive";
 
-/**
- * 243 3334333:
- * - internal: 333 FairyPlace23 (MAIL_TO_INTERNAL)
- * - client: 333 333333333333333333 (userEmails[])
- */
-export type TranscriptEmailKind = "internal" | "client";
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-type SendTranscriptEmailParams = {
-  kind: TranscriptEmailKind;
+function buildTranscriptLinks(chatName: string) {
+  const staticBaseUrl = (process.env.STATIC_BASE_URL ?? "").replace(/\/$/, "");
+
+  if (!staticBaseUrl) {
+    return {
+      htmlUrl: "",
+      pdfUrl: "",
+    };
+  }
+
+  return {
+    htmlUrl: `${staticBaseUrl}/t/${encodeURIComponent(chatName)}/html`,
+    pdfUrl: `${staticBaseUrl}/t/${encodeURIComponent(chatName)}/pdf`,
+  };
+}
+
+function buildBrief(finalJson: BotCatFinalJson) {
+  const brief = (finalJson.preamble_md ?? "").trim();
+  if (brief) return brief;
+
+  // Fallback (should be rare): show first 400 chars of dialog
+  const firstText = finalJson.messages.map((m) => m.contentOriginal_md).join("\n");
+  return firstText.slice(0, 400);
+}
+
+export async function sendTranscriptEmail(params: {
+  kind: "internal" | "client";
   to: string;
   finalJson: BotCatFinalJson;
-  drive: UploadPdfResult;
-};
+  drive: { url: string; fileId: string } | null;
+}) {
+  const { kind, to, finalJson } = params;
 
-type ResendSendResult = {
-  id: string;
-};
-
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value || !value.trim()) {
-    throw new Error(`Environment variable ${name} is not set`);
-  }
-  return value.trim();
-}
-
-/**
- * 133333 33333 333333 333 Resend API.
- * 13 3333333333, 433433 HTML 3 43433333, 333 443434343 21.
- */
-async function sendEmailWithResend(params: {
-  to: string;
-  subject: string;
-  html: string;
-}): Promise<ResendSendResult> {
-  const apiKey = requireEnv("RESEND_API_KEY");
-  const from = requireEnv("MAIL_FROM");
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [params.to],
-      subject: params.subject,
-      html: params.html,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Resend API error ${res.status}: ${text}`);
-  }
-
-  const data = (await res.json().catch(() => ({}))) as { id?: string };
-  const id = data.id ?? "";
-  if (!id) {
-    throw new Error("Resend API did not return email id");
-  }
-
-  return { id };
-}
-
-/**
- * 243333 434333 333 333333 333 22:
- * - HTML: https://static.fairyplace.net/<chatName>.html
- * - PDF:  https://static.fairyplace.net/<chatName>.pdf
- */
-function buildTranscriptLinks(params: {
-  finalJson: BotCatFinalJson;
-}): { htmlUrl: string; pdfUrl: string } {
-  const staticBase = requireEnv("STATIC_BASE_URL"); // e.g. https://static.fairyplace.net
-  const chatName = params.finalJson.chatName;
-
-  const safe = encodeURIComponent(chatName);
-  const htmlUrl = `${staticBase}/${safe}.html`;
-  const pdfUrl = `${staticBase}/${safe}.pdf`;
-
-  return { htmlUrl, pdfUrl };
-}
-
-function buildBrief(finalJson: BotCatFinalJson): string {
-  const preamble = finalJson.preamble_md?.trim();
-  if (preamble) return preamble;
-  return "";
-}
-
-/**
- * 133333 HTML 333 internal/client-3333.
- * 2 22 4333333 333333 33333.
- */
-function buildTranscriptEmailHtml(params: {
-  kind: TranscriptEmailKind;
-  finalJson: BotCatFinalJson;
-  htmlUrl: string;
-  pdfUrl: string;
-}): string {
-  const { finalJson, htmlUrl, pdfUrl, kind } = params;
+  const { htmlUrl, pdfUrl } = buildTranscriptLinks(finalJson.chatName);
+  const brief = buildBrief(finalJson);
 
   const headerUrl = "https://static.fairyplace.net/header.v3.png";
 
-  const originalLanguage = finalJson.languageOriginal || "und";
-  const brief = buildBrief(finalJson);
+  const footerInternalLines = [
+    "Email with conversation materials. Links are valid for 30 days",
+    "Sent by FairyPlace™ Mailer",
+  ];
 
-  const isInternal = kind === "internal";
+  const footerClientLines = [
+    "Email with conversation materials. Links are valid for 30 days",
+    "Sent by FairyPlace™ Mailer",
+  ];
 
-  // TT: fixed internal footer
-  const footer1Internal = "Email with conversation materials. Links are valid for 30 days";
-  const footer2Internal = "Sent by FairyPlace23 Mailer";
-
-  // keep client footer (not used in stage 1, but module can stay)
-  const footer1Client = "Email with conversation materials. Links are valid for 30 days";
-  const footer2Client = "Sent by FairyPlace23 Mailer at the client's request";
-
-  const footer1 = isInternal ? footer1Internal : footer1Client;
-  const footer2 = isInternal ? footer2Internal : footer2Client;
-
-  return `
-<!DOCTYPE html>
-<html>
-  <body style="margin:0;padding:0;background:#f5f5f5;">
-    <div style="max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#ffffff;">
-      <div style="text-align:center;margin-bottom:24px;">
-        <img src="${headerUrl}" alt="FairyPlace header" style="max-width:100%;height:auto;" />
-      </div>
-
-      <p style="margin:0 0 8px 0;"><strong>Original Language</strong>: ${originalLanguage}</p>
-
-      ${brief ? `<p style="margin:0 0 16px 0;white-space:pre-wrap;">${brief}</p>` : ""}
-
-      <p style="margin:0 0 8px 0;">
-        <a href="${htmlUrl}" style="color:#2563eb;text-decoration:none;">HTML transcript</a>
-      </p>
-      <p style="margin:0 0 16px 0;">
-        <a href="${pdfUrl}" style="color:#2563eb;text-decoration:none;">PDF transcript</a>
-      </p>
-
-      <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
-
-      <p style="font-size:12px;color:#6b7280;margin:0 0 4px 0;">${footer1}</p>
-      <p style="font-size:12px;color:#6b7280;margin:0;">${footer2}</p>
-    </div>
-  </body>
-</html>
-`.trim();
-}
-
-export async function sendTranscriptEmail(
-  params: SendTranscriptEmailParams
-): Promise<ResendSendResult> {
-  const { finalJson, kind, to } = params;
-
-  const { htmlUrl, pdfUrl } = buildTranscriptLinks({ finalJson });
+  const footerLines = kind === "internal" ? footerInternalLines : footerClientLines;
 
   const subject =
     kind === "internal"
       ? `BotCat Transcript: ${finalJson.chatName}`
       : `Your BotCat Transcript: ${finalJson.chatName}`;
 
-  const html = buildTranscriptEmailHtml({
-    kind,
-    finalJson,
-    htmlUrl,
-    pdfUrl,
-  });
+  const html = `
+  <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; line-height:1.4">
+    <div><img src="${headerUrl}" alt="FairyPlace" style="max-width:100%;height:auto" /></div>
 
-  return sendEmailWithResend({
+    <h2 style="margin:16px 0 8px 0">BotCat Transcript</h2>
+
+    <div style="margin:8px 0"><b>Original Language:</b> ${finalJson.languageOriginal}</div>
+
+    <div style="margin:12px 0">
+      <b>Brief:</b>
+      <div style="white-space:pre-wrap">${escapeHtml(brief)}</div>
+    </div>
+
+    <div style="margin:12px 0">
+      <b>Transcript HTML:</b>
+      <div><a href="${htmlUrl}">${htmlUrl}</a></div>
+    </div>
+
+    <div style="margin:12px 0">
+      <b>Transcript PDF:</b>
+      <div><a href="${pdfUrl}">${pdfUrl}</a></div>
+    </div>
+
+    <hr style="margin:16px 0" />
+
+    <div style="color:#444">
+      ${footerLines.map((l) => `<div>${escapeHtml(l)}</div>`).join("\n")}
+    </div>
+  </div>
+  `;
+
+  const res = await resend.emails.send({
+    from: process.env.MAIL_FROM ?? "FairyPlace BotCat <no-reply@fairyplace.net>",
     to,
     subject,
     html,
   });
+
+  if (res.error) {
+    throw new Error(res.error.message);
+  }
+
+  return res.data;
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
