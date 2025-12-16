@@ -1,30 +1,30 @@
-**Техническое задание**
+#   
 
-BOTCAT™ CONSULTANT
+BOTCAT CONSULTANT
 
-**Версия:** 1.0 (обновлено под этап 1: web chat v1.0)
+**:** 1.0 (   1: web chat v1.0)
 
 ---
 
-## 0. Вводная часть
+## 0.  
 
-### 0.1. Цель документа
+### 0.1.  
 
-Зафиксировать требования к проекту BotCat™ Consultant и порядок этапов реализации.
+    BotCat Consultant    .
 
-### 0.2. Этапы реализации (обновлено)
+### 0.2.   ()
 
-**Этап 1 — Web chat (v1.0): https://fairyplace.net/chat**
+** 1  Web chat (v1.0): https://fairyplace.net/chat**
 
-- Один чат.
-- История чата хранится **только в памяти UI** (без БД на этапе 1).
-- При перезагрузке страницы история **теряется**.
-- На экране есть кнопка **New Chat** (сбрасывает чат без перезагрузки страницы).
-- Общение с OpenAI через backend `/api/chat` строго **SSE**.
-- Поддержка PWA.
-- Модели OpenAI на этапе 1 используются **те, которые уже указаны в проекте** (env.ts).
+-  .
+-    **   UI** (   1).
+-     ****.
+-     **New Chat** (    ).
+-   OpenAI  backend `/api/chat`  **SSE**.
+-  PWA.
+-  OpenAI   1  **,     ** (env.ts).
 
-**Этап 2 — Интеграция с соцсетями FairyPlace™**
+** 2     FairyPlace**
 
 - WhatsApp
 - Instagram
@@ -32,55 +32,55 @@ BOTCAT™ CONSULTANT
 - Messenger
 - Viber
 
-**Этап 3 — Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
+** 3  Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
 
-- Один чат.
-- История чата хранится **только в памяти UI**.
-- При перезагрузке страницы история **теряется**.
-- В UI есть вкладка/панель (как в ChatGPT). На панели:
-  - лого;
-  - кнопка **New Chat**;
-  - кнопки **Download PDF** (скачивание PDF предыдущих бесед);
-  - кнопка открытия меню авторизации (примерно как в ChatGPT).
-- Чат активируется **только после регистрации/авторизации**.
-- На этапе 3 используются **более продвинутые модели OpenAI** (уточняются перед стартом этапа 3).
+-  .
+-    **   UI**.
+-     ****.
+-    / (  ChatGPT).  :
+  - ;
+  -  **New Chat**;
+  -  **Download PDF** ( PDF  );
+  -     (   ChatGPT).
+-   **  /**.
+-   3  **  OpenAI** (    3).
 
-Технические детали этапа 3 будут уточнены отдельно перед началом работ.
+   3        .
 
 ---
 
-## 1. Главная страница https://fairyplace.net (обновлено)
+## 1.   https://fairyplace.net ()
 
-На главной странице должны быть:
+   :
 
-- лого;
-- общая информация **на английском**;
-- кнопки перехода на страницы:
-  - v1.0 модель: `/chat`
-  - v2.0 модель: `/chat_pro`
-- кнопка перехода на официальный сайт: https://fairyplace.biz
-- кнопки отправки почты:
+- ;
+-    **;
+-    :
+  - v1.0 : `/chat`
+  - v2.0 : `/chat_pro`
+-     : https://fairyplace.biz
+-   :
   - `order@fairyplace.net`
   - `support@fairyplace.net`
-- кнопки перехода в соцсети FairyPlace™.
+-     FairyPlace.
 
 ---
 
-## 2. Общая концепция
+## 2.  
 
-BotCat™ Consultant — AI‑сервис, который:
+BotCat Consultant  AI, :
 
-- общается с клиентами на сайте `fairyplace.net`;
-- консультирует по дизайну (в рамках skills);
-- работает через backend (Vercel) с OpenAI;
-- поддерживает PWA;
-- умеет работать со ссылками и файлами через Vercel Blob.
+-    `fairyplace.net`;
+-    (  skills);
+-   backend (Vercel)  OpenAI;
+-  PWA;
+-     Vercel Blob.
 
 ---
 
-## 3. Архитектура системы (упрощение под этап 1)
+## 3.   (   1)
 
-На **этапе 1** обязательны только:
+ ** 1**  :
 
 - UI (Next.js)
 - Backend API (Next.js route handlers)
@@ -88,27 +88,27 @@ BotCat™ Consultant — AI‑сервис, который:
 - Vercel Blob
 - PWA
 
-Компоненты для стенограмм/HTML/PDF/почты/БД/Drive остаются в документе как часть общей архитектуры, но **не являются обязательными для готовности этапа 1**, если это прямо не требуется отдельной задачей.
+  /HTML/PDF///Drive          1**,       .
 
 ---
 
 ## 4. Backend API specification
 
-### 4.1. POST /api/chat (строго SSE)
+### 4.1. POST /api/chat ( SSE)
 
-Назначение: основной endpoint для общения веб‑чата с BotCat через OpenAI (SSE stream).
+:  endpoint    BotCat  OpenAI (SSE stream).
 
 **Request**
 
 - Method: POST
 - Headers: `Content-Type: application/json`
 
-Body (пример):
+Body ():
 
 ```json
 {
   "chatName": null,
-  "message": "Текст сообщения пользователя...",
+  "message": "  ...",
   "attachments": [
     {
       "blobKey": "uploads/...",
@@ -126,24 +126,24 @@ Body (пример):
 }
 ```
 
-Поля:
+:
 
 - `chatName`: `string | null`
-  - `null` для первого сообщения в сессии;
-  - строка — для продолжения существующей беседы.
-- `message`: `string` (обязательно)
-- `attachments[]`: список файлов, **уже загруженных в Blob** (см. раздел 5)
-- `client`: метаданные клиента
+  - `null`    ;
+  -      .
+- `message`: `string` ()
+- `attachments[]`:  , **   Blob** (.  5)
+- `client`:  
 
 **Response**
 
 - Status: `200 OK`
 - Content-Type: `text/event-stream`
 
-События SSE:
+ SSE:
 
-- токены/чанки текста модели
-- финальное событие:
+- /  
+-  :
 
 ```json
 {
@@ -153,95 +153,149 @@ Body (пример):
 }
 ```
 
-Ошибки:
+:
 
-- 400 — некорректный запрос
-- 500 — ошибка сервера / OpenAI
+- 400   
+- 500    / OpenAI
 
 ---
 
-## 5. Файлы и вложения (границы ответственности)
+## 5.    ( )
 
-### 5.1. USER → UI → Blob (прямая загрузка)
+### 5.1. USER  UI  Blob ( )
 
-- Пользователь выбирает файл.
-- UI **напрямую** загружает его в Vercel Blob.
-- UI получает `blobUrl` (и/или `blobKey`).
-- UI отправляет в `/api/chat` только ссылки/метаданные (не бинарные данные).
+-   .
+- UI ****   Vercel Blob.
+- UI  `blobUrl` (/ `blobKey`).
+- UI   `/api/chat`  / (   ).
 
-### 5.2. OpenAI → UI → Backend → Blob (файлы, сгенерированные моделью)
+### 5.2. OpenAI  UI  Backend  Blob (,  )
 
-- Если OpenAI сгенерировал данные (например, base64 изображения), UI передаёт это на backend.
+-  OpenAI   (, base64 ), UI    backend.
 - Backend:
-  - преобразует данные в файл (если нужно),
-  - сохраняет в Blob,
-  - возвращает UI ссылку (`blobUrl`) для отображения и дальнейшей работы.
+  -     ( ),
+  -   Blob,
+  -  UI  (`blobUrl`)     .
 
 ---
 
-## 6. PWA (обязательно)
+## 6. PWA ()
 
-UI должен:
+UI :
 
-- иметь `manifest.json`
-- иметь service worker
-- поддерживать "Install app"
-- работать в `standalone`
-- иметь иконки 192/512 px
+-  `manifest.json`
+-  service worker
+-  "Install app"
+-   `standalone`
+-   192/512 px
 
 ---
 
-## 7. Логика завершения диалога (обновлено)
+## 7.    ()
 
-Диалог считается оконченным, если:
+ , :
 
-- пользователь вышел из чата, или
-- пользователь неактивен более 1 часа.
+-    , 
+-    1 .
 
-Если пользователь продолжает общение после 1 часа+ неактивности:
+    1  :
 
-- начинается новая стенограмма с **новым** `chatName`
-- перед первой фразой пользователя в новой стенограмме добавляется пометка: **"Продолжение‑N"**
+-    **** `chatName`
+-      "-N"        .
 
-**Важно:**
+**:**
 
-- BotCat **не принимает решений** о завершении диалога.
-- Решение принимает **только backend‑оркестратор**.
-- Когда оркестратор решает завершить диалог, он даёт BotCat команду:
+- BotCat **  **  .
+-   ** backend**.
+-    ,   BotCat :
 
 `SYSTEM: finalize_transcript_now`
 
-- Только после этой команды (и только если `sendToInternal=true` по логике оркестратора) происходит вызов `/api/bot/webhook`.
+-    (     )   `/api/bot/webhook`.
 
 ---
 
-## 8. Письма клиентам (обновлено)
+## 8.   ()
 
-На текущем этапе и в текущей версии ТЗ:
+     :
 
-- бот **не отправляет письма клиентам**
-- логика email‑рассылок клиентам из предыдущей редакции ТЗ **не применяется**
+-  **    **
+-  email     ** **
 
-(Внутренние процессы/уведомления можно добавить позже отдельной задачей и отдельным разделом ТЗ.)
-
----
-
-## 9. Definition of Done (DoD) — этап 1 (обновлено)
-
-Этап 1 считается выполненным, если:
-
-- главная страница `https://fairyplace.net` соответствует разделу 1;
-- чат доступен на `https://fairyplace.net/chat`;
-- чат работает как мессенджер (пузырьки, скролл, вложения, индикаторы);
-- есть кнопка **New Chat**;
-- `/api/chat` работает **строго через SSE**;
-- загрузка файлов работает через Vercel Blob (прямая загрузка UI → Blob);
-- PWA работает (manifest, service worker, install prompt).
+( /                 .)
 
 ---
 
-## 10. MANDATORY приложения (сохранены)
+## 9. Definition of Done (DoD)   1 ()
 
-Разделы **MANDATORY_1** и **MANDATORY_2** ниже по документу остаются обязательными правилами поведения BotCat и техническими требованиями.
+ 1 , :
 
-> Примечание: если MANDATORY‑разделы противоречат обновлённым разделам 0–9, приоритет имеют разделы 0–9 как актуальная редакция ТЗ для данного репозитория.
+-   `https://fairyplace.net`   1;
+-    `https://fairyplace.net/chat`;
+-     (, , , );
+-   **New Chat**;
+- `/api/chat`  **  SSE**;
+-      Vercel Blob (  UI  Blob);
+- PWA  (manifest, service worker, install prompt).
+
+---
+
+## 10. MANDATORY  ()
+
+ **MANDATORY_1**  **MANDATORY_2**     BotCat  .
+
+> :  MANDATORY    09,    09     .
+
+---
+
+# : Final JSON contract ()
+
+ JSON      :
+
+```json
+{
+  "chatName": "FP_2025-01-01_12-00-01_abc123",
+  "languageOriginal": "en",
+  "language": "ru",
+  "preamble_md": "...",
+  "footerInternal_md": "...",
+  "footerClient_md": "...",
+  "sendToInternal": true,
+  "messages": [
+    {
+      "messageId": "...",
+      "role": "User",
+      "contentOriginal_md": "...",
+      "hasAttachments": false,
+      "hasLinks": false,
+      "isVoice": false,
+      "createdAt": "2025-01-01T12:00:00.000Z"
+    }
+  ],
+  "translatedMessages": [
+    {
+      "messageId": "...",
+      "role": "User",
+      "contentTranslated_md": "..."
+    }
+  ],
+  "attachments": [
+    {
+      "attachmentId": "...",
+      "messageId": "...",
+      "kind": "user_upload",
+      "fileName": "plan.pdf",
+      "mimeType": "application/pdf",
+      "fileSizeBytes": 123456,
+      "pageCount": null,
+      "externalUrl": null
+    }
+  ]
+}
+```
+
+:
+- `chatName`        .
+- `language`  "ru" (     ).
+- `translatedMessages`  ,    `messages[]`.
+-      .
