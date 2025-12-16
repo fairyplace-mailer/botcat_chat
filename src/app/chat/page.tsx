@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
-import ChatWindow from "@/components/chat/ChatWindow";
+import ChatWindow, { type Message as UIMessage } from "@/components/chat/ChatWindow";
 import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
 
 export type ChatMessage = {
   id: string;
   role: "User" | "BotCat";
   content: string;
+  attachments?: MessageInputData["attachments"];
   createdAt: number;
 };
 
@@ -44,6 +45,14 @@ function parseSSELineEvent(chunk: string) {
   return events;
 }
 
+function toChatWindowMessage(m: ChatMessage): UIMessage {
+  return {
+    author: m.role === "User" ? "user" : "bot",
+    text: m.content,
+    attachments: (m.attachments ?? []) as any,
+  };
+}
+
 export default function ChatPage() {
   const [chatName, setChatName] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -76,6 +85,7 @@ export default function ChatPage() {
         id: userMessageId,
         role: "User",
         content: userText,
+        attachments,
         createdAt: Date.now(),
       },
       {
@@ -142,7 +152,9 @@ export default function ChatPage() {
               const reply = typeof e.data?.reply === "string" ? e.data.reply : botText;
               botText = reply;
               setMessages((prev) =>
-                prev.map((m) => (m.id === "bot-stream" ? { ...m, id: crypto.randomUUID(), content: reply } : m))
+                prev.map((m) =>
+                  m.id === "bot-stream" ? { ...m, id: crypto.randomUUID(), content: reply } : m
+                )
               );
             }
 
@@ -165,6 +177,8 @@ export default function ChatPage() {
     }
   }
 
+  const chatWindowMessages = useMemo(() => messages.map(toChatWindowMessage), [messages]);
+
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -174,14 +188,10 @@ export default function ChatPage() {
         </button>
       </div>
 
-      {error ? (
-        <div style={{ marginTop: 12, color: "#b00020" }}>
-          Error: {error}
-        </div>
-      ) : null}
+      {error ? <div style={{ marginTop: 12, color: "#b00020" }}>Error: {error}</div> : null}
 
       <div ref={listRef} style={{ height: "65vh", overflow: "auto", marginTop: 12 }}>
-        <ChatWindow messages={messages.map((m) => ({ role: m.role, content: m.content }))} />
+        <ChatWindow messages={chatWindowMessages} isTyping={isStreaming} />
       </div>
 
       <div style={{ marginTop: 12 }}>
