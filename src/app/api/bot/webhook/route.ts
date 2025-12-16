@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 import { prisma } from "@/server/db";
 import {
   mapBotCatAttachmentsArrayToDb,
   BotCatAttachmentJson,
 } from "@/server/attachments/blob-mapper";
 import { buildFinalJsonByChatName } from "@/lib/botcat-final-json";
+import { buildTranscriptHtml } from "@/lib/transcript-html";
 import { buildTranscriptPdf } from "@/lib/transcript-pdf";
 import { uploadPdfToDrive } from "@/lib/google/drive";
 import { sendTranscriptEmail } from "@/lib/email-sender";
@@ -48,6 +50,11 @@ function parseIsoDate(value: string, fieldName: string): Date {
   }
   return d;
 }
+
+type ConversationMeta = {
+  staticHtmlBlobUrl?: string;
+  staticPdfBlobUrl?: string;
+};
 
 export async function POST(req: NextRequest) {
   const receivedAt = new Date();
@@ -172,19 +179,49 @@ export async function POST(req: NextRequest) {
     }
 
     /**
-     * Пост-обработка:
-     * - финальный JSON из БД,
-     * - генерация PDF,
-     * - загрузка PDF в Google Drive,
-     * - рассылка писем через Resend,
-     * - запись EmailLog со статусами sent/failed.
+     * [post-processing]
      */
     try {
       const finalJson = await buildFinalJsonByChatName(payload.chatName);
 
+      // 1) Generate internal HTML transcript and publish to Blob
+      const htmlInternal = buildTranscriptHtml(finalJson, "internal");
+      const htmlBlob = await put(
+        `transcripts/${finalJson.chatName}.html`,
+        htmlInternal,
+        {
+          contentType: "text/html; charset=utf-8",
+          addRandomSuffix: true,
+        }
+      );
+
+      // 2) Generate PDF (from HTML page) and publish to Blob
       const pdfBytes = await buildTranscriptPdf(finalJson);
       const pdfBuffer = Buffer.from(pdfBytes);
 
+      const pdfBlob = await put(
+        `transcripts/${finalJson.chatName}.pdf`,
+        pdfBuffer,
+        {
+          contentType: "application/pdf",
+          addRandomSuffix: true,
+        }
+      );
+
+      // Persist published URLs into Conversation.meta
+      const prevMeta = (conversation.meta ?? {}) as ConversationMeta;
+      const nextMeta: ConversationMeta = {
+        ...prevMeta,
+        staticHtmlBlobUrl: htmlBlob.url,
+        staticPdfBlobUrl: pdfBlob.url,
+      };
+
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { meta: nextMeta as any },
+      });
+
+      // Keep legacy Drive upload (for now) for internal ops
       const driveResult = await uploadPdfToDrive({
         fileName: `${payload.chatName}.pdf`,
         pdfBuffer,
@@ -198,7 +235,6 @@ export async function POST(req: NextRequest) {
 
       const emailJobs: EmailJob[] = [];
 
-      // Внутреннее письмо — если sendToInternal = true
       if (finalJson.sendToInternal) {
         const internalTo =
           process.env.MAIL_TO_INTERNAL?.trim() || "fairyplace.tm@gmail.com";
@@ -210,7 +246,6 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // Письма клиенту — если BotCat передал userEmails[]
       const userEmails = Array.isArray(payload.userEmails)
         ? payload.userEmails.filter(
             (e): e is string => typeof e === "string" && e.trim().length > 0
@@ -266,7 +301,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (postProcessError: any) {
       throw new Error(
-        `Post-processing failed (PDF/Drive/EmailLog/Resend): ${
+        `Post-processing failed (Blob/PDF/Drive/EmailLog/Resend): ${
           postProcessError?.message ?? String(postProcessError)
         }`
       );
