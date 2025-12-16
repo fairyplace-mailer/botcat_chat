@@ -1,111 +1,92 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import ChatWindow, { Message } from "@/components/chat/ChatWindow";
-import MessageInput, { MessageInputData } from "@/components/chat/MessageInput";
-import Image from "next/image";
+import React, { useMemo, useRef, useState } from "react";
+import ChatWindow from "@/components/chat/ChatWindow";
+import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
 
-type SseMetaEvent = {
-  ok: true;
-  chatName: string;
-  model: string;
-  userMessageId: string;
+export type ChatMessage = {
+  id: string;
+  role: "User" | "BotCat";
+  content: string;
+  createdAt: number;
 };
 
-type SseDeltaEvent = {
-  delta: string;
-};
+function parseSSELineEvent(chunk: string) {
+  // Minimal SSE parser for our simple protocol.
+  // We only rely on: event: <name> and data: <json> separated by blank line.
+  const blocks = chunk.split("\n\n");
+  const events: Array<{ event?: string; data?: any }> = [];
 
-type SseFinalEvent = {
-  ok: true;
-  chatName: string;
-  model: string;
-  botMessageId: string;
-  reply: string;
-};
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter(Boolean);
+    if (lines.length === 0) continue;
 
-type SseErrorEvent = {
-  ok: false;
-  error: string;
-};
+    let event: string | undefined;
+    let dataStr: string | undefined;
 
-function parseSse(streamText: string) {
-  // Minimal SSE parser. Expected frames look like:
-  // event: meta\n
-  // data: {...json...}\n
-  // \n
-  const messages: Array<{ event: string; data: any }> = [];
-  const chunks = streamText.split("\n\n");
-  for (const chunk of chunks) {
-    if (!chunk.trim()) continue;
-    const lines = chunk.split("\n");
-    let event = "message";
-    let dataLine = "";
-    for (const line of lines) {
-      if (line.startsWith("event:")) event = line.slice("event:".length).trim();
-      if (line.startsWith("data:")) dataLine += line.slice("data:".length).trim();
+    for (const l of lines) {
+      if (l.startsWith("event:")) event = l.slice("event:".length).trim();
+      if (l.startsWith("data:")) dataStr = l.slice("data:".length).trim();
     }
-    if (!dataLine) continue;
+
+    if (!dataStr) continue;
     try {
-      messages.push({ event, data: JSON.parse(dataLine) });
+      const data = JSON.parse(dataStr);
+      events.push({ event, data });
     } catch {
-      // ignore malformed
+      // ignore invalid json
     }
   }
-  return messages;
+
+  return events;
 }
 
-export default function ChatV1Page() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
+export default function ChatPage() {
   const [chatName, setChatName] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
-  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const hasConversation = messages.length > 0;
+  const canReset = useMemo(() => messages.length > 0 || chatName, [messages, chatName]);
 
-  useEffect(() => {
-    scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, isTyping]);
-
-  function resetChat() {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setMessages([]);
-    setIsTyping(false);
+  function newChat() {
     setChatName(null);
+    setMessages([]);
     setError(null);
+    setIsStreaming(false);
   }
 
-  async function onSend(data: MessageInputData) {
+  async function sendToApi(data: MessageInputData) {
     setError(null);
 
-    // optimistic add user message
+    const userText = data.message ?? "";
+    const attachments = data.attachments ?? [];
+
+    if (!userText.trim() && attachments.length === 0) return;
+
+    const userMessageId = crypto.randomUUID();
     setMessages((prev) => [
       ...prev,
       {
-        author: "user",
-        text: data.message,
-        attachments: data.attachments ?? [],
+        id: userMessageId,
+        role: "User",
+        content: userText,
+        createdAt: Date.now(),
       },
-    ]);
-
-    // placeholder bot message (we will stream into it)
-    setMessages((prev) => [
-      ...prev,
       {
-        author: "bot",
-        text: "",
-        attachments: [],
+        id: "bot-stream",
+        role: "BotCat",
+        content: "",
+        createdAt: Date.now(),
       },
     ]);
 
-    setIsTyping(true);
-
-    const ac = new AbortController();
-    abortRef.current = ac;
+    setIsStreaming(true);
 
     try {
       const res = await fetch("/api/chat", {
@@ -113,155 +94,99 @@ export default function ChatV1Page() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatName,
-          message: data.message,
-          attachments: data.attachments ?? [],
-          client: {
-            sessionId: "ui-memory",
-            userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
-            ipHash: null,
-          },
+          message: userText,
+          attachments,
         }),
-        signal: ac.signal,
       });
 
       if (!res.ok || !res.body) {
-        setIsTyping(false);
-        setError("Failed to send message");
-        return;
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let botText = "";
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
+
         buffer += decoder.decode(value, { stream: true });
 
-        // process complete SSE frames when we have a \n\n
+        // Process full events when we have blank-line delimiter.
+        if (!buffer.includes("\n\n")) continue;
+
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
+
         for (const part of parts) {
-          const parsed = parseSse(part + "\n\n");
-          for (const msg of parsed) {
-            if (msg.event === "meta") {
-              const meta = msg.data as SseMetaEvent;
-              if (meta?.chatName) setChatName(meta.chatName);
+          const events = parseSSELineEvent(part + "\n\n");
+          for (const e of events) {
+            if (e.event === "meta") {
+              if (e.data?.chatName) setChatName(e.data.chatName);
             }
-            if (msg.event === "delta") {
-              const d = msg.data as SseDeltaEvent;
-              const delta = d?.delta ?? "";
-              if (!delta) continue;
-              setMessages((prev) => {
-                const next = [...prev];
-                // last message must be bot placeholder
-                for (let i = next.length - 1; i >= 0; i--) {
-                  if (next[i].author === "bot") {
-                    next[i] = { ...next[i], text: next[i].text + delta };
-                    break;
-                  }
-                }
-                return next;
-              });
+
+            if (e.event === "delta") {
+              const delta = typeof e.data?.delta === "string" ? e.data.delta : "";
+              if (delta) {
+                botText += delta;
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === "bot-stream" ? { ...m, content: botText } : m))
+                );
+              }
             }
-            if (msg.event === "final") {
-              const fin = msg.data as SseFinalEvent;
-              if (fin?.chatName) setChatName(fin.chatName);
-              // ensure last bot message is set to final reply
-              setMessages((prev) => {
-                const next = [...prev];
-                for (let i = next.length - 1; i >= 0; i--) {
-                  if (next[i].author === "bot") {
-                    next[i] = { ...next[i], text: fin.reply ?? next[i].text };
-                    break;
-                  }
-                }
-                return next;
-              });
-              setIsTyping(false);
+
+            if (e.event === "final") {
+              const reply = typeof e.data?.reply === "string" ? e.data.reply : botText;
+              botText = reply;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === "bot-stream" ? { ...m, id: crypto.randomUUID(), content: reply } : m))
+              );
             }
-            if (msg.event === "error") {
-              const err = msg.data as SseErrorEvent;
-              setError(err?.error || "Server error");
-              setIsTyping(false);
+
+            if (e.event === "error") {
+              throw new Error(e.data?.error || "Stream error");
             }
           }
         }
       }
-
-      setIsTyping(false);
     } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setIsTyping(false);
-      setError("Network error");
+      setError(e?.message || "Failed to send message");
+      // Remove bot placeholder if it never got content
+      setMessages((prev) => prev.filter((m) => m.id !== "bot-stream"));
     } finally {
-      abortRef.current = null;
+      setIsStreaming(false);
+      // autoscroll
+      requestAnimationFrame(() => {
+        listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+      });
     }
   }
 
-  const headerTitle = useMemo(() => {
-    if (!hasConversation) return "BotCat Consultant v1.0";
-    return chatName ? `Chat: ${chatName}` : "Chat";
-  }, [chatName, hasConversation]);
-
   return (
-    <div className="min-h-screen bg-background flex">
-      {/* Sidebar (desktop only) */}
-      <aside className="w-64 bg-muted border-r border-border hidden md:flex flex-col">
-        <div className="p-4 flex items-center justify-center">
-          <Image src="/BotCat_Portrait.png" alt="BotCat" width={48} height={48} />
-        </div>
-
-        <button
-          className="m-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition"
-          onClick={resetChat}
-          disabled={isTyping}
-        >
+    <main style={{ maxWidth: 900, margin: "0 auto", padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <h1 style={{ margin: 0 }}>FairyPlace BotCat (v1.0)</h1>
+        <button type="button" onClick={newChat} disabled={!canReset || isStreaming}>
           New Chat
         </button>
+      </div>
 
-        <div className="flex-1 p-4 overflow-auto">
-          <p className="text-muted-foreground">One chat (in-memory)</p>
+      {error ? (
+        <div style={{ marginTop: 12, color: "#b00020" }}>
+          Error: {error}
         </div>
-      </aside>
+      ) : null}
 
-      {/* Main */}
-      <main className="flex-1 flex flex-col">
-        <header className="p-4 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="md:hidden">
-              <Image src="/BotCat_Portrait.png" alt="BotCat" width={32} height={32} />
-            </div>
-            <h1 className="text-xl font-bold text-foreground">{headerTitle}</h1>
-          </div>
+      <div ref={listRef} style={{ height: "65vh", overflow: "auto", marginTop: 12 }}>
+        <ChatWindow messages={messages.map((m) => ({ role: m.role, content: m.content }))} />
+      </div>
 
-          <button
-            className="md:hidden px-3 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition"
-            onClick={resetChat}
-            disabled={isTyping}
-          >
-            New Chat
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="flex-1 overflow-auto">
-            {!hasConversation ? (
-              <div className="p-6 text-muted-foreground">
-                Ask BotCat about design. Your chat is stored only in this page memory.
-              </div>
-            ) : null}
-            <ChatWindow messages={messages} isTyping={isTyping} />
-            <div ref={scrollAnchorRef} />
-          </div>
-
-          <footer className="p-4 border-t border-border">
-            {error ? <div className="mb-2 text-red-600 text-sm">{error}</div> : null}
-            <MessageInput onSend={onSend} disabled={false} loading={isTyping} />
-          </footer>
-        </div>
-      </main>
-    </div>
+      <div style={{ marginTop: 12 }}>
+        <MessageInput onSend={sendToApi} disabled={isStreaming} loading={isStreaming} />
+      </div>
+    </main>
   );
 }
