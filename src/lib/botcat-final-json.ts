@@ -9,6 +9,8 @@ import {
 
 /**
  * Zod-схемы под итоговый JSON BotCat → backend.
+ *
+ * ВАЖНО: структура должна строго соответствовать актуальному ТЗ (docs/spec.md).
  */
 
 // --- Базовые под-схемы ---
@@ -27,26 +29,22 @@ export const BotCatMessageSchema = z.object({
 
 export type BotCatMessage = z.infer<typeof BotCatMessageSchema>;
 
-export const BotCatTranslatedMessageEntrySchema = z.object({
+export const BotCatTranslatedMessageSchema = z.object({
+  messageId: z.string().min(1),
   contentTranslated_md: z.string(),
   language: z.string().min(2).max(5), // "ru" и пр.
 });
 
-export type BotCatTranslatedMessageEntry = z.infer<
-  typeof BotCatTranslatedMessageEntrySchema
->;
+export type BotCatTranslatedMessage = z.infer<typeof BotCatTranslatedMessageSchema>;
 
 // --- Итоговый JSON ---
 
 export const BotCatFinalJsonSchema = z.object({
-  schemaVersion: z.literal("1.0").default("1.0"),
-
-  chatName: z.string().min(1),
   languageOriginal: z.string().min(2).max(5),
 
   messages: z.array(BotCatMessageSchema),
 
-  translatedMessages: z.record(z.string(), BotCatTranslatedMessageEntrySchema),
+  translatedMessages: z.array(BotCatTranslatedMessageSchema),
 
   attachments: z.array(BotCatAttachmentSchema),
 
@@ -69,6 +67,8 @@ export type BuildFinalJsonOptions = {
 
 /**
  * Сборка итогового JSON по chatName из БД.
+ *
+ * Примечание: chatName используется только как ключ выборки, но НЕ входит в итоговый JSON.
  */
 export async function buildFinalJsonByChatName(
   chatName: string,
@@ -89,7 +89,7 @@ export async function buildFinalJsonByChatName(
   }
 
   // messages[]
-  const messages: BotCatMessage[] = conversation.messages.map((m: any) => ({
+  const messages: BotCatMessage[] = (conversation.messages as any[]).map((m) => ({
     messageId: m.message_id,
     role: m.role as BotCatMessage["role"],
     contentOriginal_md: m.content_original_md,
@@ -99,33 +99,32 @@ export async function buildFinalJsonByChatName(
     createdAt: m.created_at.toISOString(),
   }));
 
-  // translatedMessages{}
-  const translatedMessages: Record<string, BotCatTranslatedMessageEntry> = {};
-
   const languageOriginal =
     (conversation.language_original || "und").trim() || "und";
 
-  for (const m of conversation.messages as any[]) {
-    const translatedText =
-      m.content_translated_md ?? m.content_original_md ?? "";
+  // translatedMessages[]
+  const translatedMessages: BotCatTranslatedMessage[] = (conversation.messages as any[]).map(
+    (m) => {
+      const translatedText = m.content_translated_md ?? m.content_original_md ?? "";
 
-    translatedMessages[m.message_id] = {
-      contentTranslated_md: translatedText,
-      language: "ru",
-    };
-  }
+      return {
+        messageId: m.message_id,
+        contentTranslated_md: translatedText,
+        language: "ru",
+      };
+    }
+  );
 
   // attachments[]
-  const attachments: BotCatAttachment[] = conversation.attachments.map(
-    (a: any) => ({
+  const attachments: BotCatAttachment[] = (conversation.attachments as any[]).map(
+    (a) => ({
       attachmentId: a.id,
       messageId: a.message_id,
       kind: a.kind as BotCatAttachment["kind"],
 
       fileName: a.file_name,
       mimeType: a.mime_type,
-      fileSizeBytes:
-        typeof a.file_size_bytes === "number" ? a.file_size_bytes : null,
+      fileSizeBytes: typeof a.file_size_bytes === "number" ? a.file_size_bytes : null,
       pageCount: typeof a.page_count === "number" ? a.page_count : null,
 
       originalUrl: a.external_url,
@@ -140,8 +139,6 @@ export async function buildFinalJsonByChatName(
   const sendToInternal = conversation.send_to_internal;
 
   const draft: BotCatFinalJson = {
-    schemaVersion: "1.0",
-    chatName,
     languageOriginal,
 
     messages,
