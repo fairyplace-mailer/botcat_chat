@@ -3,6 +3,14 @@ import { BotCatFinalJson } from "@/lib/botcat-final-json";
 
 export type TranscriptMode = "internal" | "public";
 
+function asTranslatedMap(data: BotCatFinalJson): Record<string, { contentTranslated_md: string; role: "User" | "BotCat" }> {
+  const map: Record<string, { contentTranslated_md: string; role: "User" | "BotCat" }> = {};
+  for (const tm of data.translatedMessages ?? []) {
+    map[tm.messageId] = { contentTranslated_md: tm.contentTranslated_md, role: tm.role };
+  }
+  return map;
+}
+
 /**
  * Генерация HTML-стенограммы в bubble-style.
  * mode:
@@ -17,10 +25,12 @@ export function buildTranscriptHtml(
     chatName,
     preamble_md,
     messages,
-    translatedMessages,
     attachments,
     languageOriginal,
   } = data;
+
+  // translatedMessages is an array per spec; build a quick lookup by messageId
+  const translatedById = asTranslatedMap(data);
 
   const style = `
     * {
@@ -219,13 +229,18 @@ export function buildTranscriptHtml(
     .map((m) => {
       const isUser = m.role === "User";
 
-      // INTERNAL: ВСЕГДА только перевод на RU
-      // PUBLIC: только оригинал (на языке клиента)
+      // INTERNAL:
+      // - if original language is ru -> use original as "translation" (old spec rule)
+      // - else -> use translatedMessages by messageId (fallback to original)
+      // PUBLIC: only original
       let bodySourceMd: string;
       if (mode === "internal") {
-        const translated = translatedMessages[m.messageId];
-        bodySourceMd =
-          translated?.contentTranslated_md ?? m.contentOriginal_md;
+        if (languageOriginal === "ru") {
+          bodySourceMd = m.contentOriginal_md;
+        } else {
+          const translated = translatedById[m.messageId];
+          bodySourceMd = translated?.contentTranslated_md ?? m.contentOriginal_md;
+        }
       } else {
         bodySourceMd = m.contentOriginal_md;
       }
