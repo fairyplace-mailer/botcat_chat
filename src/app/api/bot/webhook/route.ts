@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
     }
 
     /**
-     * [post-processing]
+     * [post-processing]
      */
     try {
       const finalJson = await buildFinalJsonByChatName(payload.chatName);
@@ -190,6 +190,7 @@ export async function POST(req: NextRequest) {
         `transcripts/${finalJson.chatName}.html`,
         htmlInternal,
         {
+          access: "public",
           contentType: "text/html; charset=utf-8",
           addRandomSuffix: true,
         }
@@ -203,6 +204,7 @@ export async function POST(req: NextRequest) {
         `transcripts/${finalJson.chatName}.pdf`,
         pdfBuffer,
         {
+          access: "public",
           contentType: "application/pdf",
           addRandomSuffix: true,
         }
