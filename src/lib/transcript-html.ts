@@ -32,11 +32,10 @@ function looksLikeImage(mimeType: string | null | undefined): boolean {
 }
 
 /**
- * 2333434343443 021da-4443334333333 33 bubble-style.
+ * Bubble-style transcript renderer.
  * mode:
- *  - "internal"  1d 4333434343 3333433343 33 RU (3333 FairyPlace
-12)
- *  - "public"    1d 4333434343 3333333333333 (3333 333333333333)
+ *  - "internal"  => use RU translation (unless languageOriginal === "ru")
+ *  - "public"    => original only
  */
 export function buildTranscriptHtml(
   data: BotCatFinalJson,
@@ -213,7 +212,7 @@ export function buildTranscriptHtml(
 
   const md = (s: string) => marked.parse(s || "");
 
-  // attachments 33 messageId
+  // attachments by messageId
   const attachmentsByMessage: Record<string, typeof attachments> = {};
   for (const a of attachments) {
     if (!attachmentsByMessage[a.messageId]) {
@@ -254,13 +253,9 @@ export function buildTranscriptHtml(
                 const name = escapeHtml(a.fileName || "(no name)");
                 const mime = escapeHtml(a.mimeType || "?");
 
-                // Choose best image source for preview:
-                // - prefer explicit preview
-                // - else fallback to original blob
-                // - else fallback to original url
-                const previewUrl =
-                  a.blobUrlPreview || a.blobUrlOriginal || a.originalUrl;
-
+                // IMPORTANT (TT requirement): For images we render ONLY the preview (<=80KB).
+                // Never fallback to original image URLs in HTML/PDF.
+                const previewUrl = a.blobUrlPreview || null;
                 const isImg = looksLikeImage(a.mimeType);
 
                 const previewBlock =
@@ -292,8 +287,7 @@ export function buildTranscriptHtml(
 
                 return `
                   <div class="attachment-item">
-                    <div><strong></strong></div>
-                    <div><strong>${name}</strong>  b</strong>  b b b b b b b b b b b b b b b b b b b b b b b b b b b b b</strong></div>
+                    <div><strong>${name}</strong></div>
                     <div>${mime}</div>
                     ${previewBlock}
                     ${linksHtml}
@@ -324,15 +318,13 @@ export function buildTranscriptHtml(
       ? `
       <div class="footer-block">
         <p>Email with conversation materials. Links are valid for 30 days.</p>
-        <p>Sent by FairyPlace
-12 Mailer</p>
+        <p>Sent by FairyPlace™ Mailer</p>
       </div>
     `
       : `
       <div class="footer-block">
         <p>Email with conversation materials. Links are valid for 30 days.</p>
-        <p>Sent by FairyPlace
-12 Mailer at the client's request</p>
+        <p>Sent by FairyPlace™ Mailer at the client's request</p>
       </div>
     `;
 
@@ -347,7 +339,7 @@ export function buildTranscriptHtml(
 <body>
   <div class="page">
     <div class="header">
-      <img src="/header.v3.png" alt="FairyPlace header" />
+      <img src="https://static.fairyplace.net/header.v3.png" alt="FairyPlace header" />
     </div>
 
     <div class="title-block">
