@@ -2,9 +2,9 @@ import type { BotCatFinalJson } from "@/lib/botcat-final-json";
 import type { UploadPdfResult } from "@/lib/google/drive";
 
 /**
- * Тип письма:
- * - internal: для FairyPlace™ (MAIL_TO_INTERNAL)
- * - client: для пользователя (userEmails[])
+ * 243 3334333:
+ * - internal: 333 FairyPlace23 (MAIL_TO_INTERNAL)
+ * - client: 333 333333333333333333 (userEmails[])
  */
 export type TranscriptEmailKind = "internal" | "client";
 
@@ -28,8 +28,8 @@ function requireEnv(name: string): string {
 }
 
 /**
- * Базовая отправка письма через Resend API.
- * Без вложений, только HTML и ссылки, как требует ТЗ.
+ * 133333 33333 333333 333 Resend API.
+ * 13 3333333333, 433433 HTML 3 43433333, 333 443434343 21.
  */
 async function sendEmailWithResend(params: {
   to: string;
@@ -68,58 +68,35 @@ async function sendEmailWithResend(params: {
 }
 
 /**
- * Строим ссылки для письма:
- * - HTML-страница: APP_BASE_URL/conversations/<chatName>
- * - PDF: ссылка на файл в Google Drive (по fileId / webViewLink)
+ * 243333 434333 333 333333 333 22:
+ * - HTML: https://static.fairyplace.net/<chatName>.html
+ * - PDF:  https://static.fairyplace.net/<chatName>.pdf
  */
 function buildTranscriptLinks(params: {
   finalJson: BotCatFinalJson;
-  drive: UploadPdfResult;
 }): { htmlUrl: string; pdfUrl: string } {
-  const appBase = requireEnv("APP_BASE_URL"); // напр. http://localhost:3000 или https://fairyplace.net
+  const staticBase = requireEnv("STATIC_BASE_URL"); // e.g. https://static.fairyplace.net
   const chatName = params.finalJson.chatName;
 
-  // SSR HTML по ТЗ: /conversations/[chatName]
-  const htmlUrl = `${appBase}/conversations/${encodeURIComponent(chatName)}`;
-
-  let pdfUrl: string;
-  if (params.drive.webViewLink) {
-    pdfUrl = params.drive.webViewLink;
-  } else if (params.drive.fileId) {
-    pdfUrl = `https://drive.google.com/file/d/${params.drive.fileId}/view?usp=sharing`;
-  } else if (params.drive.webContentLink) {
-    pdfUrl = params.drive.webContentLink;
-  } else {
-    // fallback: API-роут генерации PDF
-    const base = appBase;
-    pdfUrl = `${base}/api/conversations/${encodeURIComponent(chatName)}/pdf`;
-  }
+  const safe = encodeURIComponent(chatName);
+  const htmlUrl = `${staticBase}/${safe}.html`;
+  const pdfUrl = `${staticBase}/${safe}.pdf`;
 
   return { htmlUrl, pdfUrl };
 }
 
-/**
- * Простейший brief: первые несколько сообщений, обрезанные до 400 символов.
- * Без пересказа, только выдержка из реального текста.
- */
 function buildBrief(finalJson: BotCatFinalJson): string {
-  const parts: string[] = [];
-
-  for (const msg of finalJson.messages.slice(0, 4)) {
-    parts.push(`${msg.role}: ${msg.contentOriginal_md}`);
-  }
-
-  const joined = parts.join(" ");
-  if (joined.length <= 400) return joined;
-  return joined.slice(0, 400) + "…";
+  const preamble = finalJson.preamble_md?.trim();
+  if (preamble) return preamble;
+  return "";
 }
 
 /**
- * Общий HTML для internal/client-писем.
+ * 133333 HTML 333 internal/client-3333.
+ * 2 22 4333333 333333 33333.
  */
 function buildTranscriptEmailHtml(params: {
   kind: TranscriptEmailKind;
-  to: string;
   finalJson: BotCatFinalJson;
   htmlUrl: string;
   pdfUrl: string;
@@ -131,20 +108,18 @@ function buildTranscriptEmailHtml(params: {
   const originalLanguage = finalJson.languageOriginal || "und";
   const brief = buildBrief(finalJson);
 
-  const footer1Internal =
-    finalJson.footerInternal_md?.trim() ||
-    "Email with conversation materials. Links are valid for 30 days.";
-  const footer1Client =
-    finalJson.footerClient_md?.trim() ||
-    "Email with conversation materials. Links are valid for 30 days.";
-
-  const footer1 = kind === "internal" ? footer1Internal : footer1Client;
-
-  const footer2Internal = "Sent by FairyPlace™ Mailer";
-  const footer2Client =
-    "Sent by FairyPlace™ Mailer at the client's request";
-
   const isInternal = kind === "internal";
+
+  // TT: fixed internal footer
+  const footer1Internal = "Email with conversation materials. Links are valid for 30 days";
+  const footer2Internal = "Sent by FairyPlace23 Mailer";
+
+  // keep client footer (not used in stage 1, but module can stay)
+  const footer1Client = "Email with conversation materials. Links are valid for 30 days";
+  const footer2Client = "Sent by FairyPlace23 Mailer at the client's request";
+
+  const footer1 = isInternal ? footer1Internal : footer1Client;
+  const footer2 = isInternal ? footer2Internal : footer2Client;
 
   return `
 <!DOCTYPE html>
@@ -155,51 +130,33 @@ function buildTranscriptEmailHtml(params: {
         <img src="${headerUrl}" alt="FairyPlace header" style="max-width:100%;height:auto;" />
       </div>
 
-      <h2 style="font-size:20px;margin:0 0 16px 0;">Conversation transcript</h2>
+      <p style="margin:0 0 8px 0;"><strong>Original Language</strong>: ${originalLanguage}</p>
+
+      ${brief ? `<p style="margin:0 0 16px 0;white-space:pre-wrap;">${brief}</p>` : ""}
 
       <p style="margin:0 0 8px 0;">
-        <strong>Chat name:</strong> ${finalJson.chatName}
+        <a href="${htmlUrl}" style="color:#2563eb;text-decoration:none;">HTML transcript</a>
       </p>
-      <p style="margin:0 0 8px 0;">
-        <strong>Original language:</strong> ${originalLanguage}
+      <p style="margin:0 0 16px 0;">
+        <a href="${pdfUrl}" style="color:#2563eb;text-decoration:none;">PDF transcript</a>
       </p>
-
-      <h3 style="font-size:16px;margin:16px 0 8px 0;">Brief</h3>
-      <p style="margin:0 0 16px 0;white-space:pre-wrap;">${brief}</p>
-
-      <h3 style="font-size:16px;margin:16px 0 8px 0;">Links</h3>
-      <ul style="margin:0 0 16px 20px;padding:0;">
-        <li style="margin-bottom:8px;">
-          <a href="${htmlUrl}" style="color:#2563eb;text-decoration:none;">Open HTML transcript</a>
-        </li>
-        <li style="margin-bottom:8px;">
-          <a href="${pdfUrl}" style="color:#2563eb;text-decoration:none;">Download PDF transcript</a>
-        </li>
-      </ul>
 
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;" />
 
-      <p style="font-size:12px;color:#6b7280;margin:0 0 4px 0;">
-        ${footer1}
-      </p>
-      <p style="font-size:12px;color:#6b7280;margin:0;">
-        ${isInternal ? footer2Internal : footer2Client}
-      </p>
+      <p style="font-size:12px;color:#6b7280;margin:0 0 4px 0;">${footer1}</p>
+      <p style="font-size:12px;color:#6b7280;margin:0;">${footer2}</p>
     </div>
   </body>
 </html>
 `.trim();
 }
 
-/**
- * Публичная точка: отправить письмо (internal/client) с материалами стенограммы.
- */
 export async function sendTranscriptEmail(
   params: SendTranscriptEmailParams
 ): Promise<ResendSendResult> {
-  const { finalJson, drive, kind, to } = params;
+  const { finalJson, kind, to } = params;
 
-  const { htmlUrl, pdfUrl } = buildTranscriptLinks({ finalJson, drive });
+  const { htmlUrl, pdfUrl } = buildTranscriptLinks({ finalJson });
 
   const subject =
     kind === "internal"
@@ -208,7 +165,6 @@ export async function sendTranscriptEmail(
 
   const html = buildTranscriptEmailHtml({
     kind,
-    to,
     finalJson,
     htmlUrl,
     pdfUrl,
