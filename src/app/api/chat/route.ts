@@ -5,10 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { generateChatName, generateMessageId } from "@/lib/chat-ids";
 import { detectAndTranslate } from "@/lib/translator";
 import { detectHasLinks, detectIsVoice } from "@/lib/message-flags";
+import { BotCatAttachmentSchema, type BotCatAttachment } from "@/lib/botcat-attachment";
 
 type ChatRequestBody = {
   chatName?: string | null;
   message?: string;
+  attachments?: BotCatAttachment[];
 };
 
 function sse(data: unknown, event?: string) {
@@ -16,6 +18,34 @@ function sse(data: unknown, event?: string) {
   if (event) lines.push(`event: ${event}`);
   lines.push(`data: ${JSON.stringify(data)}`);
   return lines.join("\n") + "\n\n";
+}
+
+function toOpenAIInputFromAttachments(attachments: BotCatAttachment[]) {
+  // Stage v1.0: We only send what the OpenAI API can consume directly.
+  // - images as input_image
+  // - pdf/csv/text/json as input_file
+  // Anything else is ignored (still stored in our transcript later if needed).
+  const parts: Array<any> = [];
+
+  for (const a of attachments) {
+    const url = a.blobUrlOriginal ?? a.originalUrl;
+    const mime = a.mimeType ?? "";
+    if (!url) continue;
+
+    if (mime.startsWith("image/")) {
+      parts.push({ type: "input_image", image_url: url });
+      continue;
+    }
+
+    // OpenAI supports input_file with a URL for certain types (pdf, etc.).
+    parts.push({
+      type: "input_file",
+      filename: a.fileName ?? "attachment",
+      file_url: url,
+    });
+  }
+
+  return parts;
 }
 
 export async function POST(req: NextRequest) {
@@ -36,6 +66,13 @@ export async function POST(req: NextRequest) {
         JSON.stringify({ ok: false, error: "Field 'message' is required" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
+    }
+
+    const attachmentsRaw = Array.isArray(body.attachments) ? body.attachments : [];
+    const parsedAttachments: BotCatAttachment[] = [];
+    for (const item of attachmentsRaw) {
+      const parsed = BotCatAttachmentSchema.safeParse(item);
+      if (parsed.success) parsedAttachments.push(parsed.data);
     }
 
     const now = new Date();
@@ -64,14 +101,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (!conversation) {
-      // Новый диалог: генерируем chatName и создаём Conversation
       chatName = generateChatName(now);
 
       conversation = await prisma.conversation.create({
         data: {
           chat_name: chatName,
           status: "active",
-          language_original: languageOriginal, // автоопределённый язык первого сообщения
+          language_original: languageOriginal,
           send_to_internal: true,
           started_at: now,
           last_activity_at: now,
@@ -91,7 +127,7 @@ export async function POST(req: NextRequest) {
         role: "User",
         content_original_md: message,
         content_translated_md: userTranslatedMd,
-        has_attachments: false,
+        has_attachments: parsedAttachments.length > 0,
         has_links: userHasLinks,
         is_voice: userIsVoice,
         created_at: now,
@@ -99,7 +135,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Обновляем conversation (last_activity + счётчик)
     conversation = await prisma.conversation.update({
       where: { id: conversation.id },
       data: {
@@ -111,9 +146,9 @@ export async function POST(req: NextRequest) {
     // 3. SSE stream from OpenAI
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    // (stage 1) Keep existing model selection logic: default gpt-4.1-mini.
-    // We'll centralize it later when we wire full UI contract.
     const model = "gpt-4.1-mini";
+
+    const attachmentParts = toOpenAIInputFromAttachments(parsedAttachments);
 
     const stream = await client.responses.stream({
       model,
@@ -130,10 +165,8 @@ export async function POST(req: NextRequest) {
         {
           role: "user",
           content: [
-            {
-              type: "input_text",
-              text: message,
-            },
+            { type: "input_text", text: message },
+            ...attachmentParts,
           ],
         },
       ],
@@ -147,21 +180,27 @@ export async function POST(req: NextRequest) {
       start(controller) {
         controller.enqueue(
           encoder.encode(
-            sse({ ok: true, chatName, model, userMessageId }, "meta")
+            sse(
+              {
+                ok: true,
+                chatName,
+                model,
+                userMessageId,
+                attachmentsCount: parsedAttachments.length,
+              },
+              "meta"
+            )
           )
         );
 
         (async () => {
           try {
             for await (const event of stream) {
-              // OpenAI SDK emits a variety of event types. We only forward deltas.
               if (event.type === "response.output_text.delta") {
                 const delta = event.delta ?? "";
                 if (delta) {
                   fullReply += delta;
-                  controller.enqueue(
-                    encoder.encode(sse({ delta }, "delta"))
-                  );
+                  controller.enqueue(encoder.encode(sse({ delta }, "delta")));
                 }
               }
 
@@ -170,7 +209,6 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Ensure stream is fully consumed
             await stream.done();
 
             // 3.1. Перевод ответа BotCat на RU
@@ -225,13 +263,7 @@ export async function POST(req: NextRequest) {
           } catch (e) {
             controller.enqueue(
               encoder.encode(
-                sse(
-                  {
-                    ok: false,
-                    error: "Internal Server Error",
-                  },
-                  "error"
-                )
+                sse({ ok: false, error: "Internal Server Error" }, "error")
               )
             );
             controller.close();
