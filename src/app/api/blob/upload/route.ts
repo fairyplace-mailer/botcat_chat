@@ -3,10 +3,33 @@ import { handleUpload } from "@vercel/blob/client";
 // Vercel Blob: generate a client token for direct uploads.
 // Docs: https://vercel.com/docs/storage/vercel-blob
 //
-// Stage v1.0 per spec:
+// Stage v1.0 per TR/spec:
 // - The browser uploads directly to Blob.
-// - We keep this endpoint permissive: OpenAI may accept many formats, and v1.0
-//   limits are effectively Vercel/runtime limits.
+// - addRandomSuffix: true
+// - store contentType (Blob stores contentType for the uploaded object)
+// - restrict allowedContentTypes (roughly: ChatGPT-supported file types, excluding code)
+
+const ALLOWED_CONTENT_TYPES = [
+  // Text
+  "text/plain", // .txt
+  "text/markdown", // .md
+  "application/pdf", // .pdf
+  "application/rtf", // .rtf
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+
+  // Data
+  "text/csv", // .csv
+  "application/json", // .json
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+
+  // Images
+  "image/png",
+  "image/jpeg", // .jpg/.jpeg
+  "image/webp",
+
+  // Archives
+  "application/zip", // .zip (allowed as attachment; no server-side inspection in v1.0)
+] as const;
 
 export async function POST(request: Request): Promise<Response> {
   const body = await request.json();
@@ -16,13 +39,15 @@ export async function POST(request: Request): Promise<Response> {
     request,
 
     // Contract (v2): must accept (pathname, clientPayload, multipart) and return
-    // token options (not "allowed: true/false").
-    onBeforeGenerateToken: async (pathname, _clientPayload, _multipart) => {
+    // token options.
+    onBeforeGenerateToken: async (_pathname, _clientPayload, _multipart) => {
       return {
         addRandomSuffix: true,
+        allowedContentTypes: [...ALLOWED_CONTENT_TYPES],
+
         // Must be a string (it will be returned back to onUploadCompleted).
-        // We keep it minimal.
-        tokenPayload: pathname,
+        // Keep it minimal and non-sensitive.
+        tokenPayload: "v1",
       };
     },
 
