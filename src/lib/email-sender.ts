@@ -32,7 +32,6 @@ export async function sendTranscriptEmail(params: {
   kind: "internal" | "client";
   to: string;
   finalJson: BotCatFinalJson;
-  drive: { url: string; fileId: string } | null;
 }) {
   const { kind, to, finalJson } = params;
 
@@ -43,12 +42,12 @@ export async function sendTranscriptEmail(params: {
 
   const footerInternalLines = [
     "Email with conversation materials. Links are valid for 30 days",
-    "Sent by FairyPlace™ Mailer",
+    "Sent by FairyPlace Mailer",
   ];
 
   const footerClientLines = [
     "Email with conversation materials. Links are valid for 30 days",
-    "Sent by FairyPlace™ Mailer",
+    "Sent by FairyPlace Mailer",
   ];
 
   const footerLines = kind === "internal" ? footerInternalLines : footerClientLines;
