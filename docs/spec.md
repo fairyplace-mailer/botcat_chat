@@ -1,4 +1,4 @@
-# BOTCAT™ CONSULTANT
+# BOTCAT2 CONSULTANT
 
 **Version:** 1.0 (Stage 1: web chat v1.0)
 
@@ -6,27 +6,27 @@
 
 ## 0. Context and scope
 
-This repository contains BotCat Consultant – a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
+This repository contains BotCat Consultant  a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
 
 ### 0.1 Stages
 
-**Stage 1 – Web chat (v1.0): https://fairyplace.net/chat**
+**Stage 1  Web chat (v1.0): https://fairyplace.net/chat**
 
 - One chat.
 - Chat history is stored **only in UI memory** (lost on page reload).
 - Button **New Chat** resets the current chat without reloading the page.
 - Backend `/api/chat` responds via **SSE**.
 - PWA.
-- Attachments: user uploads go **UI → Blob directly**.
+- Attachments: user uploads go **UI  Blob directly**.
 
-**Stage 2 – Social integrations** (bots in FairyPlace™ social channels).
+**Stage 2  Social integrations** (bots in FairyPlace2 social channels).
 
-**Stage 3 – Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
+**Stage 3  Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
 
 - One chat.
 - Chat history is stored **only in UI memory** (lost on page reload).
 - Requires registration/auth (details before Stage 3 implementation).
-- UI includes a “sidebar/tab” like ChatGPT:
+- UI includes a sidebar/tab like ChatGPT:
   - logo
   - New Chat
   - links/buttons to download previous PDFs
@@ -36,9 +36,9 @@ This repository contains BotCat Consultant – a web chat (Next.js) with a backe
 
 ## 1. Website routes (public)
 
-- `https://fairyplace.net` – **main landing page** (logo, English info, buttons/links). *(Implementation later)*
-- `https://fairyplace.net/chat` – BotCat Consultant v1.0 UI.
-- `https://fairyplace.net/chat_pro` – BotCat Consultant v2.0 UI. *(Implementation later)*
+- `https://fairyplace.net`  **main landing page** (logo, English info, buttons/links). *(Implementation later)*
+- `https://fairyplace.net/chat`  BotCat Consultant v1.0 UI.
+- `https://fairyplace.net/chat_pro`  BotCat Consultant v2.0 UI. *(Implementation later)*
 
 Static domain:
 - `STATIC_BASE_URL = https://static.fairyplace.net`
@@ -65,7 +65,7 @@ When conversation ends (user left or 1h+ inactive), orchestrator triggers finali
 
 For images included into transcripts (HTML/PDF/email):
 - preview width: **600px**
-- target size: **≤ 80KB**
+- target size: ** 80KB**
 - preview format: **webp** (fallback to jpeg when needed)
 
 Previews are generated on server during finalization (webhook), based on **Blob original URL**.
@@ -81,14 +81,14 @@ Previews are generated on server during finalization (webhook), based on **Blob 
 
 ---
 
-## 5. Transcript artifacts (HTML/PDF) – internal vs original
+## 5. Transcript artifacts (HTML/PDF)  internal vs original
 
 ### 5.1 Artifact types
 
 The system supports **two transcript views**:
 
-- **Internal (RU translated)** – used for internal team workflows and internal email.
-- **Original** – in the original conversation language (no translation).
+- **Internal (RU translated)**  used for internal team workflows and internal email.
+- **Original**  in the original conversation language (no translation).
 
 For each chat we support 4 artifacts:
 
@@ -104,13 +104,13 @@ For each chat we support 4 artifacts:
 
 ### 5.3 Stage enablement
 
-**Stage 1 (v1.0) – enabled:**
+**Stage 1 (v1.0)  enabled:**
 - Send **1 internal email** to `fairyplace.tm@gmail.com`.
 - Provide links to:
   - **1 HTML (internal RU)**
   - **1 PDF (internal RU)**
 
-**Stage 2/3 (v2.0) – enabled:**
+**Stage 2/3 (v2.0)  enabled:**
 - Send **1 internal email** to `fairyplace.tm@gmail.com` with links to:
   - **HTML_internal_ru** (in email)
   - **PDF_internal_ru** (in email)
@@ -135,7 +135,23 @@ Notes:
 
 ---
 
-## 6. Internal email (FairyPlace™)
+## 6. Blob TTL / retention (MANDATORY)
+
+Blob storage is limited (Vercel Hobby). Therefore **all Blob objects are temporary**.
+
+**TTL: 30 days** applies to ALL files stored in Blob:
+- user-upload originals
+- preview images
+- published HTML transcripts
+
+After 30 days Blob links may stop working.
+This is explicitly mentioned in the internal email footer.
+
+Cleanup runs automatically via Vercel Cron (hourly trigger, daily execution at local midnight Asia/Jerusalem).
+
+---
+
+## 7. Internal email (FairyPlace2)
 
 Internal email must include:
 - header image: `https://static.fairyplace.net/header.v3.png`
@@ -145,8 +161,8 @@ Internal email must include:
 - link to internal HTML transcript
 - link to internal PDF transcript
 - footer:
-  - “Email with conversation materials. Links are valid for 30 days”
-  - “Sent by FairyPlace™ Mailer”
+  - Email with conversation materials. Links are valid for 30 days
+  - Sent by FairyPlace2 Mailer
 
 ---
 
