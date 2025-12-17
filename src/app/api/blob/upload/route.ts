@@ -1,45 +1,62 @@
-import { NextRequest, NextResponse } from "next/server";
-import { parse } from "url";
-import { put } from "@vercel/blob";
+import { handleUpload } from "@vercel/blob/client";
 
-// Допустимые MIME-типы (на основании ТЗ)
-const ALLOWED_MIME_TYPES = [
-  "image/png", "image/jpeg", "image/gif", "image/webp",
-  "audio/mpeg", "audio/ogg", "audio/wav",
-  "application/pdf", "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "text/plain"
-];
-const MAX_FILE_SIZE_BYTES = 4.5 * 1024 * 1024; // 4.5MB
-const DEFAULT_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 дней по умолчанию
+// Vercel Blob: generate a client token for direct uploads.
+// Docs: https://vercel.com/docs/storage/vercel-blob
+//
+// Stage v1.0 per TR/spec:
+// - The browser uploads directly to Blob.
+// - addRandomSuffix: true
+// - store contentType (Blob stores contentType for the uploaded object)
+// - restrict allowedContentTypes (roughly: ChatGPT-supported file types, excluding code)
 
-export async function POST(req: NextRequest) {
-  try {
-    const { fileName, mimeType, fileSizeBytes } = await req.json();
+const ALLOWED_CONTENT_TYPES = [
+  // Text
+  "text/plain", // .txt
+  "text/markdown", // .md
+  "application/pdf", // .pdf
+  "application/rtf", // .rtf
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
 
-    // Проверка полей
-    if (!fileName || typeof fileName !== "string") {
-      return NextResponse.json({ error: "Missing or invalid fileName" }, { status: 400 });
-    }
-    if (!mimeType || typeof mimeType !== "string" || !ALLOWED_MIME_TYPES.includes(mimeType)) {
-      return NextResponse.json({ error: "MimeType not allowed" }, { status: 400 });
-    }
-    if (!fileSizeBytes || typeof fileSizeBytes !== "number" || fileSizeBytes > MAX_FILE_SIZE_BYTES) {
-      return NextResponse.json({ error: "File too large" }, { status: 400 });
-    }
+  // Data
+  "text/csv", // .csv
+  "application/json", // .json
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
 
-    // Генерация upload токена через @vercel/blob SDK
-    // put() сам хранит файл, поэтому здесь только эмуляция: используем generateUploadUrl
-    // В Vercel Blob v2 upload делается через runtime API, пример:
-    // const { url, blob } = await put(fileName, file, { access: "public", contentType: mimeType, addRandomSuffix: true, token });
-    // Но для получения signed uploadUrl надо использовать REST API (fetch) или custom logic (см. https://vercel.com/docs/storage/vercel-blob/direct-upload)
-    
-    // Так как SDK put() vs REST upload разный:
-    // Здесь client ожидает url + ключ; придётся эмулировать выдачу URL (иначе использовать REST-обёртку)
-    return NextResponse.json({
-      error: "Not implemented: Для поддержки прямого upload используйте REST API / direct upload через generateUploadUrl по документации Vercel."
-    }, { status: 501 });
-  } catch (err) {
-    return NextResponse.json({ error: "Server error", detail: String(err) }, { status: 500 });
-  }
+  // Images
+  "image/png",
+  "image/jpeg", // .jpg/.jpeg
+  "image/webp",
+
+  // Archives
+  "application/zip", // .zip (allowed as attachment; no server-side inspection in v1.0)
+] as const;
+
+export async function POST(request: Request): Promise<Response> {
+  const body = await request.json();
+
+  const result = await handleUpload({
+    body,
+    request,
+
+    // Contract (v2): must accept (pathname, clientPayload, multipart) and return
+    // token options.
+    onBeforeGenerateToken: async (_pathname, _clientPayload, _multipart) => {
+      return {
+        addRandomSuffix: true,
+        allowedContentTypes: [...ALLOWED_CONTENT_TYPES],
+
+        // Must be a string (it will be returned back to onUploadCompleted).
+        // Keep it minimal and non-sensitive.
+        tokenPayload: "v1",
+      };
+    },
+
+    onUploadCompleted: async () => {
+      // Stage v1.0: no-op. We don't persist upload metadata in DB.
+    },
+  });
+
+  // handleUpload() returns a typed union that isn't a Fetch Response.
+  // Next route handlers must return Response, so we wrap it.
+  return Response.json(result);
 }
