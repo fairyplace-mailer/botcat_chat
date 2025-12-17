@@ -94,12 +94,11 @@ export async function GET() {
   const runStartedAt = new Date();
   const timeZone = process.env.TIMEZONE?.trim() || "Asia/Jerusalem";
 
-  // Decide if we should run cleanup now: local 00:00–00:05
+  // Decide if we should run cleanup now: local 00:00–00:59
   const localNow = getLocalNow(timeZone);
   const localHour = Number(localNow.toISOString().slice(11, 13));
-  const localMinute = Number(localNow.toISOString().slice(14, 16));
 
-  const isCleanupWindow = localHour === 0 && localMinute <= 5;
+  const isCleanupWindow = localHour === 0;
   if (!isCleanupWindow) {
     return NextResponse.json({ ok: true, skipped: true, reason: "outside-window" });
   }
