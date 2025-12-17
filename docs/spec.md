@@ -1,256 +1,156 @@
-#   
+# BOTCAT™ CONSULTANT
 
-BOTCAT CONSULTANT
-
-**:** 1.0 (   1: web chat v1.0)
+**Version:** 1.0 (Stage 1: web chat v1.0)
 
 ---
 
-## 0.  
+## 0. Context and scope
 
-### 0.1.  
+This repository contains BotCat Consultant – a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
 
-    BotCat Consultant    .
+### 0.1 Stages
 
-### 0.2.   ()
+**Stage 1 – Web chat (v1.0): https://fairyplace.net/chat**
 
-** 1  Web chat (v1.0): https://fairyplace.net/chat**
+- One chat.
+- Chat history is stored **only in UI memory** (lost on page reload).
+- Button **New Chat** resets the current chat without reloading the page.
+- Backend `/api/chat` responds via **SSE**.
+- PWA.
+- Attachments: user uploads go **UI → Blob directly**.
 
--  .
--    **   UI** (   1).
--     ****.
--     **New Chat** (    ).
--   OpenAI  backend `/api/chat`  **SSE**.
--  PWA.
--  OpenAI   1  **,     ** (env.ts).
+**Stage 2 – Social integrations** (bots in FairyPlace™ social channels).
 
-** 2     FairyPlace**
+**Stage 3 – Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
 
-- WhatsApp
-- Instagram
-- Telegram
-- Messenger
-- Viber
-
-** 3  Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
-
--  .
--    **   UI**.
--     ****.
--    / (  ChatGPT).  :
-  - ;
-  -  **New Chat**;
-  -  **Download PDF** ( PDF  );
-  -     (   ChatGPT).
--   **  /**.
--   3  **  OpenAI** (    3).
-
-   3        .
+- One chat.
+- Chat history is stored **only in UI memory** (lost on page reload).
+- Requires registration/auth (details before Stage 3 implementation).
+- UI includes a “sidebar/tab” like ChatGPT:
+  - logo
+  - New Chat
+  - links/buttons to download previous PDFs
+  - auth menu
 
 ---
 
-## 1.   https://fairyplace.net ()
+## 1. Website routes (public)
 
-   :
+- `https://fairyplace.net` – **main landing page** (logo, English info, buttons/links). *(Implementation later)*
+- `https://fairyplace.net/chat` – BotCat Consultant v1.0 UI.
+- `https://fairyplace.net/chat_pro` – BotCat Consultant v2.0 UI. *(Implementation later)*
 
-- ;
--    **;
--    :
-  - v1.0 : `/chat`
-  - v2.0 : `/chat_pro`
--     : https://fairyplace.biz
--   :
-  - `order@fairyplace.net`
-  - `support@fairyplace.net`
--     FairyPlace.
+Static domain:
+- `STATIC_BASE_URL = https://static.fairyplace.net`
 
 ---
 
-## 2.  
+## 2. Transcript lifecycle (important)
 
-BotCat Consultant  AI, :
+- `chatName` is **mandatory** and must be globally unique in DB.
+- BotCat never decides when to finalize a transcript. Finalization is triggered by the **orchestrator**.
 
--    `fairyplace.net`;
--    (  skills);
--   backend (Vercel)  OpenAI;
--  PWA;
--     Vercel Blob.
+When conversation ends (user left or 1h+ inactive), orchestrator triggers finalization by calling `/api/bot/webhook`.
 
 ---
 
-## 3.   (   1)
+## 3. Attachments & previews
 
- ** 1**  :
+### 3.1 User uploads
 
-- UI (Next.js)
-- Backend API (Next.js route handlers)
-- OpenAI
-- Vercel Blob
-- PWA
+- UI uploads files directly to Vercel Blob via `/api/blob/upload`.
+- Backend receives only Blob URLs in `/api/chat` and stores them.
 
-  /HTML/PDF///Drive          1**,       .
+### 3.2 Previews (MANDATORY)
 
----
+For images included into transcripts (HTML/PDF/email):
+- preview width: **600px**
+- target size: **≤ 80KB**
+- preview format: **webp** (fallback to jpeg when needed)
 
-## 4. Backend API specification
-
-### 4.1. POST /api/chat ( SSE)
-
-:  endpoint    BotCat  OpenAI (SSE stream).
-
-**Request**
-
-- Method: POST
-- Headers: `Content-Type: application/json`
-
-Body ():
-
-```json
-{
-  "chatName": null,
-  "message": "  ...",
-  "attachments": [
-    {
-      "blobKey": "uploads/...",
-      "fileName": "plan.pdf",
-      "mimeType": "application/pdf",
-      "fileSizeBytes": 123456,
-      "blobUrl": "https://..."
-    }
-  ],
-  "client": {
-    "sessionId": "c7f3d5c0-6f0c-4c5a-9f3b-2f3e...",
-    "userAgent": "Mozilla/5.0 ...",
-    "ipHash": "sha256:..."
-  }
-}
-```
-
-:
-
-- `chatName`: `string | null`
-  - `null`    ;
-  -      .
-- `message`: `string` ()
-- `attachments[]`:  , **   Blob** (.  5)
-- `client`:  
-
-**Response**
-
-- Status: `200 OK`
-- Content-Type: `text/event-stream`
-
- SSE:
-
-- /  
--  :
-
-```json
-{
-  "type": "final",
-  "chatName": "FP_2025-01-01_12-00-01_abc123",
-  "messageId": "FP_2025-01-01_12-00-01_abc123__b_001"
-}
-```
-
-:
-
-- 400   
-- 500    / OpenAI
+Previews are generated on server during finalization (webhook), based on **Blob original URL**.
 
 ---
 
-## 5.    ( )
+## 4. Backend API
 
-### 5.1. USER  UI  Blob ( )
+### 4.1 POST `/api/chat` (SSE)
 
--   .
-- UI ****   Vercel Blob.
-- UI  `blobUrl` (/ `blobKey`).
-- UI   `/api/chat`  / (   ).
-
-### 5.2. OpenAI  UI  Backend  Blob (,  )
-
--  OpenAI   (, base64 ), UI    backend.
-- Backend:
-  -     ( ),
-  -   Blob,
-  -  UI  (`blobUrl`)     .
+- Request JSON includes `chatName | null`, `message`, optional `attachments[]`, and client metadata.
+- Response is `text/event-stream` with incremental deltas and a final event.
 
 ---
 
-## 6. PWA ()
+## 5. Transcript artifacts (HTML/PDF) – internal vs original
 
-UI :
+### 5.1 Artifact types
 
--  `manifest.json`
--  service worker
--  "Install app"
--   `standalone`
--   192/512 px
+The system supports **two transcript views**:
 
----
+- **Internal (RU translated)** – used for internal team workflows and internal email.
+- **Original** – in the original conversation language (no translation).
 
-## 7.    ()
+For each chat we support 4 artifacts:
 
- , :
+1) `HTML_internal_ru`
+2) `PDF_internal_ru`
+3) `HTML_original`
+4) `PDF_original`
 
--    , 
--    1 .
+### 5.2 Storage rules (current)
 
-    1  :
+- **HTML artifacts** may be stored/published via Blob and accessible from `STATIC_BASE_URL`.
+- **PDF artifacts are stored ONLY in Google Drive** (no PDF in Blob) to avoid Blob quota issues.
 
--    **** `chatName`
--      "-N"        .
+### 5.3 Stage enablement
 
-**:**
+**Stage 1 (v1.0) – enabled:**
+- Send **1 internal email** to `fairyplace.tm@gmail.com`.
+- Provide links to:
+  - **1 HTML (internal RU)**
+  - **1 PDF (internal RU)**
 
-- BotCat **  **  .
--   ** backend**.
--    ,   BotCat :
+**Stage 2/3 (v2.0) – enabled:**
+- Send **1 internal email** to `fairyplace.tm@gmail.com` with links to:
+  - **HTML_internal_ru** (in email)
+  - **PDF_internal_ru** (in email)
+- UI provides access (like ChatGPT links/buttons) to:
+  - **HTML_original**
+  - **PDF_original**
 
-`SYSTEM: finalize_transcript_now`
+### 5.4 Public routes for accessing artifacts
 
--    (     )   `/api/bot/webhook`.
+We use project routes under the static domain:
 
----
+- HTML internal: `GET ${STATIC_BASE_URL}/t/<chatName>/html`
+- PDF internal: `GET ${STATIC_BASE_URL}/t/<chatName>/pdf`
 
-## 8.   ()
+Notes:
+- `.../t/<chatName>/pdf` returns the PDF from **Google Drive** (stream/redirect), but PDF is stored in Drive.
 
-     :
-
--  **    **
--  email     ** **
-
-( /                 .)
-
----
-
-## 9. Definition of Done (DoD)   1 ()
-
- 1 , :
-
--   `https://fairyplace.net`   1;
--    `https://fairyplace.net/chat`;
--     (, , , );
--   **New Chat**;
-- `/api/chat`  **  SSE**;
--      Vercel Blob (  UI  Blob);
-- PWA  (manifest, service worker, install prompt).
+(When Stage 2/3 is implemented we will add:
+- `GET ${STATIC_BASE_URL}/t/<chatName>/html/original`
+- `GET ${STATIC_BASE_URL}/t/<chatName>/pdf/original`
+)
 
 ---
 
-## 10. MANDATORY  ()
+## 6. Internal email (FairyPlace™)
 
- **MANDATORY_1**  **MANDATORY_2**     BotCat  .
-
-> :  MANDATORY    09,    09     .
+Internal email must include:
+- header image: `https://static.fairyplace.net/header.v3.png`
+- Original language (ISO 639-1)
+- optional fields (company/name/contact) only if provided
+- brief: `preamble_md`
+- link to internal HTML transcript
+- link to internal PDF transcript
+- footer:
+  - “Email with conversation materials. Links are valid for 30 days”
+  - “Sent by FairyPlace™ Mailer”
 
 ---
 
-# : Final JSON contract ()
-
- JSON      :
+## Appendix: Final JSON contract
 
 ```json
 {
@@ -294,8 +194,7 @@ UI :
 }
 ```
 
-:
-- `chatName`        .
-- `language`  "ru" (     ).
-- `translatedMessages`  ,    `messages[]`.
--      .
+Rules:
+- `chatName` is mandatory and unique.
+- `language` is always `"ru"` (internal transcript language).
+- If `languageOriginal === "ru"`, then translated content equals original content (no translation).
