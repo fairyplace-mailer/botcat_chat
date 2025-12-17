@@ -25,7 +25,7 @@ function getDriveClient(): drive_v3.Drive {
     );
   }
 
-  // Превращаем "...\n...\n" в реальный многострочный ключ
+  // Превращаем "...\\n...\\n" в реальный многострочный ключ
   const privateKey = privateKeyRaw.replace(/\\n/g, "\n");
 
   const auth = new google.auth.JWT({
@@ -81,7 +81,7 @@ export async function uploadPdfToDrive(params: {
     requestBody,
     media,
     fields: "id, webViewLink, webContentLink",
-    supportsAllDrives: true, // 🔧 КЛЮЧЕВО ДЛЯ SHARED DRIVE
+    supportsAllDrives: true, // 🔧 ключево для Shared Drive
   });
 
   const fileId = res.data.id;
@@ -94,4 +94,25 @@ export async function uploadPdfToDrive(params: {
     webViewLink: res.data.webViewLink || undefined,
     webContentLink: res.data.webContentLink || undefined,
   };
+}
+
+/**
+ * Скачивание файла из Google Drive как Node.js stream.
+ * Используется для отдачи PDF через наш домен (/t/<chatName>/pdf).
+ */
+export async function downloadFileFromDrive(fileId: string) {
+  const drive = getDriveClient();
+
+  const res = await drive.files.get(
+    {
+      fileId,
+      alt: "media",
+      supportsAllDrives: true,
+    },
+    {
+      responseType: "stream",
+    }
+  );
+
+  return res.data;
 }
