@@ -1,11 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { prisma } from "@/server/db";
+import { downloadFileFromDrive } from "@/lib/google/drive";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type ConversationMeta = {
-  staticPdfBlobUrl?: string;
+  internalPdfDriveFileId?: string;
 };
 
 export async function GET(
@@ -28,12 +29,21 @@ export async function GET(
   }
 
   const meta = (conv.meta ?? {}) as ConversationMeta;
-  if (!meta.staticPdfBlobUrl) {
+  if (!meta.internalPdfDriveFileId) {
     return new Response("Not published", {
       status: 404,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
 
-  return NextResponse.redirect(meta.staticPdfBlobUrl, { status: 302 });
+  const driveStream = await downloadFileFromDrive(meta.internalPdfDriveFileId);
+
+  return new Response(driveStream as any, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${decoded}.pdf"`,
+      "Cache-Control": "no-store",
+    },
+  });
 }
