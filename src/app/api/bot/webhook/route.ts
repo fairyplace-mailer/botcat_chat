@@ -53,7 +53,7 @@ function parseIsoDate(value: string, fieldName: string): Date {
 
 type ConversationMeta = {
   staticHtmlBlobUrl?: string;
-  staticPdfBlobUrl?: string;
+  internalPdfDriveFileId?: string;
 };
 
 export async function POST(req: NextRequest) {
@@ -196,37 +196,26 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      // 2) Generate PDF (from HTML page) and publish to Blob
+      // 2) Generate PDF (internal) and store it in Drive only
       const pdfBytes = await buildTranscriptPdf(finalJson);
       const pdfBuffer = Buffer.from(pdfBytes);
 
-      const pdfBlob = await put(
-        `transcripts/${finalJson.chatName}.pdf`,
+      const driveResult = await uploadPdfToDrive({
+        fileName: `${payload.chatName}.pdf`,
         pdfBuffer,
-        {
-          access: "public",
-          contentType: "application/pdf",
-          addRandomSuffix: true,
-        }
-      );
+      });
 
       // Persist published URLs into Conversation.meta
       const prevMeta = (conversation.meta ?? {}) as ConversationMeta;
       const nextMeta: ConversationMeta = {
         ...prevMeta,
         staticHtmlBlobUrl: htmlBlob.url,
-        staticPdfBlobUrl: pdfBlob.url,
+        internalPdfDriveFileId: driveResult.fileId,
       };
 
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { meta: nextMeta as any },
-      });
-
-      // Keep Drive upload for internal ops (not used in email links)
-      await uploadPdfToDrive({
-        fileName: `${payload.chatName}.pdf`,
-        pdfBuffer,
       });
 
       type EmailJob = {
