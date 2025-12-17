@@ -223,8 +223,8 @@ export async function POST(req: NextRequest) {
         data: { meta: nextMeta as any },
       });
 
-      // Keep legacy Drive upload (for now) for internal ops
-      const driveResult = await uploadPdfToDrive({
+      // Keep Drive upload for internal ops (not used in email links)
+      await uploadPdfToDrive({
         fileName: `${payload.chatName}.pdf`,
         pdfBuffer,
       });
@@ -268,7 +268,6 @@ export async function POST(req: NextRequest) {
             kind: job.kind,
             to: job.to,
             finalJson,
-            drive: driveResult,
           });
 
           await prisma.emailLog.create({
