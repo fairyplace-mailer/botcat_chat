@@ -51,8 +51,14 @@ function parseIsoDate(value: string, fieldName: string): Date {
   return d;
 }
 
+function addDays(base: Date, days: number): Date {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return new Date(base.getTime() + days * msPerDay);
+}
+
 type ConversationMeta = {
   staticHtmlBlobUrl?: string;
+  staticHtmlExpiresAt?: string;
   internalPdfDriveFileId?: string;
 };
 
@@ -210,6 +216,7 @@ export async function POST(req: NextRequest) {
       const nextMeta: ConversationMeta = {
         ...prevMeta,
         staticHtmlBlobUrl: htmlBlob.url,
+        staticHtmlExpiresAt: addDays(receivedAt, 30).toISOString(),
         internalPdfDriveFileId: driveResult.fileId,
       };
 
