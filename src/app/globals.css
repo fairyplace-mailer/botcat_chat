@@ -75,13 +75,14 @@ body {
 .hero h1 {
   font-size: 40px;
   margin: 0 0 16px;
-  max-width: 820px;
+  /* widen by ~25% to reach 2 lines on common widths */
+  max-width: 1025px;
 }
 
 .hero p {
   font-size: 18px;
   color: var(--text-secondary);
-  max-width: 820px;
+  max-width: 1025px;
   margin: 0;
 }
 
@@ -114,6 +115,11 @@ body {
   color: var(--text-primary);
 }
 
+.nav-item:hover {
+  background: rgba(37, 99, 235, 0.06);
+  color: var(--action);
+}
+
 .nav-item.active {
   background: rgba(37, 99, 235, 0.08);
   color: var(--action);
@@ -139,8 +145,12 @@ body {
   color: inherit;
 }
 
-.card--compact {
-  padding: 16px;
+.card--square {
+  /* keep height, reduce width toward square */
+  aspect-ratio: 1 / 1;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
 }
 
 .card-title {
@@ -155,7 +165,12 @@ body {
   margin-bottom: 16px;
 }
 
+.card-actions {
+  margin-top: auto;
+}
+
 .btn-primary {
+  display: inline-block;
   background: var(--action);
   color: #fff;
   border: none;
@@ -163,9 +178,11 @@ body {
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .btn-secondary {
+  display: inline-block;
   background: transparent;
   border: 1px solid var(--border);
   padding: 12px 20px;
@@ -173,6 +190,7 @@ body {
   font-weight: 600;
   color: var(--primary);
   cursor: pointer;
+  text-decoration: none;
 }
 
 /* Responsive: stack dashboard */
@@ -192,5 +210,9 @@ body {
 
   .cards {
     grid-template-columns: 1fr;
+  }
+
+  .card--square {
+    max-width: 520px;
   }
 }
