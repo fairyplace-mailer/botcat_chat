@@ -116,8 +116,13 @@ body {
   color: var(--text-primary);
 }
 
-/* ensure ALL sidebar links hover the same */
-.nav-item:hover {
+/* ensure hover applies for all states (including visited) */
+.nav-item:visited {
+  color: var(--text-primary);
+}
+
+.nav-item:hover,
+.nav-item:visited:hover {
   background: rgba(37, 99, 235, 0.06);
   color: var(--action);
 }
