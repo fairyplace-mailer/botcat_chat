@@ -63,17 +63,19 @@ export default function HomePage() {
       <section className="dashboard">
         <aside className="sidebar">
           <h3>Navigation</h3>
-          {NAV_ITEMS.map((item, idx) => (
-            <a
-              key={item.href}
-              href={item.href}
-              target="_blank"
-              rel="noreferrer"
-              className={`nav-item${idx === activeIndex ? " active" : ""}`}
-            >
-              {item.label}
-            </a>
-          ))}
+          <nav aria-label="FairyPlace navigation">
+            {NAV_ITEMS.map((item, idx) => (
+              <a
+                key={item.href}
+                href={item.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`nav-item${idx === activeIndex ? " active" : ""}`}
+              >
+                {item.label}
+              </a>
+            ))}
+          </nav>
         </aside>
 
         <main className="content">
@@ -89,7 +91,7 @@ export default function HomePage() {
                 />
               </div>
               <div className="card-title">
-                <strong>{`BotCat${TM} — Instant`}</strong> Free bespoke surface design consultant using
+                <strong>{`BotCat${TM}  Instant`}</strong> Free bespoke surface design consultant using
                 proven, cost-efficient AI models. No signup required. Fast concepts and
                 sketches.
               </div>
@@ -111,7 +113,7 @@ export default function HomePage() {
                 />
               </div>
               <div className="card-title">
-                <strong>{`BotCat${TM} — Pro (signup required)`}</strong> Free bespoke design consultant
+                <strong>{`BotCat${TM}  Pro (signup required)`}</strong> Free bespoke design consultant
                 powered by the latest OpenAI models. Registration required. Higher accuracy,
                 deeper iterations, and downloadable transcripts of past conversations.
               </div>
