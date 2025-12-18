@@ -1,40 +1,28 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/*
-  Enterprise SaaS palette (auto theme via prefers-color-scheme)
-  Rules:
-  - Blue = actions/links
-  - Yellow = rare brand accent
-  - Greys = base UI
-*/
+/* Global styles */
 
 :root {
-  /* Light */
-  --bg: #f5f7fa;
-  --surface: #ffffff;
-  --primary: #1f2937;
+  --bg: #F5F7FA;
+  --surface: #FFFFFF;
+  --primary: #1F2937;
   --secondary: #374151;
-  --action: #2563eb;
-  --brand: #f2c94c;
-  --text-primary: #0f172a;
+  --action: #2563EB;
+  --brand: #F2C94C;
+  --text-primary: #0F172A;
   --text-secondary: #475569;
-  --border: #e2e8f0;
+  --border: #E2E8F0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Dark */
-    --bg: #0a0e14;
+    --bg: #0A0E14;
     --surface: #111827;
-    --primary: #e5e7eb;
-    --secondary: #9ca3af;
-    --action: #3b82f6;
-    --brand: #f2c94c;
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --border: #1f2937;
+    --primary: #E5E7EB;
+    --secondary: #9CA3AF;
+    --action: #3B82F6;
+    --brand: #F2C94C;
+    --text-primary: #F8FAFC;
+    --text-secondary: #CBD5E1;
+    --border: #1F2937;
   }
 }
 
@@ -49,52 +37,52 @@ body {
   color: var(--text-primary);
 }
 
-/* Nice default focus */
-:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--action) 70%, transparent);
-  outline-offset: 2px;
-}
-
-/*
-  Homepage (1:1 with provided Enterprise SaaS example)
-*/
-
+/* HERO */
 .hero {
   padding: 80px 64px;
-  background: linear-gradient(180deg, #ffffff 0%, #f5f7fa 100%);
+  background: linear-gradient(180deg, #FFFFFF 0%, #F5F7FA 100%);
   border-bottom: 1px solid var(--border);
-}
-
-/* IMPORTANT: place the dark override AFTER the light .hero rule so it wins in the cascade */
-@media (prefers-color-scheme: dark) {
-  .hero {
-    background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
-    border-bottom: 1px solid var(--border);
-  }
-}
-
-.hero-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
 }
 
 .hero h1 {
   font-size: 40px;
   margin: 0 0 16px;
-  /* widen by ~25% to reach 2 lines on common widths */
   max-width: 1025px;
 }
 
 .hero p {
   font-size: 18px;
   color: var(--text-secondary);
-  /* paragraph width */
   max-width: 820px;
-  margin: 0;
+  margin-bottom: 32px;
 }
 
+.hero-actions {
+  display: flex;
+  gap: 16px;
+}
+
+.btn-primary {
+  background: var(--action);
+  color: #fff;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+/* DASHBOARD */
 .dashboard {
   display: grid;
   grid-template-columns: 240px 1fr;
@@ -114,26 +102,21 @@ body {
   margin-bottom: 16px;
 }
 
-/* Enterprise nav behaviour: no active, only hover/focus */
 .nav-item {
   display: block;
   padding: 10px 12px;
   border-radius: 6px;
   margin-bottom: 8px;
   cursor: pointer;
+  color: #1F2937;
   text-decoration: none;
-  color: var(--primary);
   transition: background 0.15s ease, color 0.15s ease;
-}
-
-.nav-item:visited {
-  color: var(--primary);
 }
 
 .nav-item:hover,
 .nav-item:focus-visible {
   background: rgba(37, 99, 235, 0.08);
-  color: var(--action);
+  color: #2563EB;
   font-weight: 600;
   outline: none;
 }
@@ -146,7 +129,6 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
-  align-items: start;
 }
 
 .card {
@@ -154,168 +136,52 @@ body {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 24px;
-  text-decoration: none;
-  color: inherit;
-}
-
-.card--square {
-  /* keep height, reduce width toward square */
-  aspect-ratio: 1 / 1;
-  max-width: 420px;
-  display: flex;
-  flex-direction: column;
-}
-
-.card--instant {
-  /* increase distance between sidebar and the first (left) card */
-  margin-left: 48px;
 }
 
 .card-title {
   font-size: 14px;
   color: var(--text-secondary);
-  margin: 0 0 8px;
+  margin-bottom: 8px;
 }
 
-.card-media {
-  display: flex;
-  justify-content: center;
-  /* push image+text down */
-  margin-top: 48px;
-  margin-bottom: 16px;
+.card-value {
+  font-size: 28px;
+  font-weight: 700;
 }
 
-.card-actions {
-  margin-top: auto;
-}
-
-.btn-primary {
+.badge {
   display: inline-block;
-  background: var(--action);
-  color: #fff;
-  border: none;
-  padding: 12px 20px;
-  border-radius: 8px;
+  background: var(--brand);
+  color: #000;
+  font-size: 12px;
   font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 999px;
+  margin-left: 8px;
 }
 
-.btn-secondary {
-  display: inline-block;
-  background: transparent;
-  border: 1px solid var(--border);
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-weight: 600;
-  color: var(--primary);
-  cursor: pointer;
-  text-decoration: none;
-}
-
-/*
-  Chat input (BotCow-like layout)
-*/
-
-.message-input_wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.message-input_row {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
-.message-input_textarea {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 8px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  font-size: 14px;
-  resize: none;
-  overflow: auto;
-  box-sizing: border-box;
-  background: var(--surface);
-  color: var(--text-primary);
-}
-
-.message-input_attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.message-input_attachment {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  background: var(--surface);
-  font-size: 13px;
-}
-
-.message-input_attachment a {
-  color: var(--action);
-  text-decoration: none;
-}
-
-.message-input_attachment a:hover {
-  text-decoration: underline;
-}
-
-.message-input_error {
-  color: #dc2626;
-  font-size: 13px;
-}
-
-.message-input_uploading {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.message-input_attach {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-}
-
-/* Responsive: stack dashboard */
-@media (max-width: 960px) {
+/* Dark-mode overrides placed after base rules so they win in cascade */
+@media (prefers-color-scheme: dark) {
   .hero {
-    padding: 64px 24px;
-  }
-
-  .dashboard {
-    grid-template-columns: 1fr;
-  }
-
-  .sidebar {
-    border-right: none;
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
     border-bottom: 1px solid var(--border);
   }
 
-  .cards {
-    grid-template-columns: 1fr;
+  .hero h1 {
+    color: var(--text-primary);
   }
 
-  .card--square {
-    max-width: 520px;
+  .hero p {
+    color: var(--text-secondary);
   }
 
-  .card--instant {
-    margin-left: 0;
+  .nav-item {
+    color: var(--primary);
   }
 
-  .card-media {
-    margin-top: 32px;
+  .nav-item:hover,
+  .nav-item:focus-visible {
+    background: rgba(59, 130, 246, 0.14);
+    color: var(--action);
   }
 }
