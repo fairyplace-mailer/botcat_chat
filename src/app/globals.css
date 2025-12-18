@@ -82,7 +82,7 @@ body {
 .hero p {
   font-size: 18px;
   color: var(--text-secondary);
-  /* revert paragraph width back (smaller than h1) */
+  /* paragraph width */
   max-width: 820px;
   margin: 0;
 }
@@ -116,19 +116,19 @@ body {
   color: var(--text-primary);
 }
 
-/* ensure hover applies for all states (including visited) */
+/* keep color consistent even after visiting */
 .nav-item:visited {
   color: var(--text-primary);
 }
 
 /*
-  Force hover state (some browsers/visited combinations can win cascade)
-  We use !important only here as requested.
+  Hover styling exactly like the example.
+  We force it to apply to all items.
 */
-.nav-item:hover,
-.nav-item:visited:hover {
-  background: rgba(37, 99, 235, 0.06) !important;
+.nav-item:hover {
+  background: rgba(37, 99, 235, 0.08) !important;
   color: var(--action) !important;
+  font-weight: 600;
 }
 
 .nav-item.active {
@@ -179,7 +179,7 @@ body {
 .card-media {
   display: flex;
   justify-content: center;
-  /* push image+text down (3x from previous ~16px) */
+  /* push image+text down */
   margin-top: 48px;
   margin-bottom: 16px;
 }
