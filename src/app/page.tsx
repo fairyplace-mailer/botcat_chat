@@ -34,26 +34,26 @@ const TM = "\u2122";
 export default function HomePage() {
   return (
     <main>
-      <section className="hero">
-        <div className="hero-head">
-          <div>
-            <h1>
-              {`BotCat${TM} by FairyPlace${TM} helps you create bespoke surface designs for fabric, wallpaper, and leather`}
-            </h1>
-            <p className="hero-p">
-              From concept to approved sketches, you receive print-on-demand links with
-              partners such as Spoonflower, Contrado, and others. The design is free; you
-              pay only POD partners for production.
-            </p>
-          </div>
+      <section className="hero" style={{ position: "relative" }}>
+        <div>
+          <h1>
+            {`BotCat${TM} by FairyPlace${TM} helps you create bespoke surface designs for fabric, wallpaper, and leather`}
+          </h1>
+          <p className="hero-p">
+            From concept to approved sketches, you receive print-on-demand links with
+            partners such as Spoonflower, Contrado, and others. The design is free; you pay
+            only POD partners for production.
+          </p>
+        </div>
 
+        <div style={{ position: "absolute", top: 24, right: 24 }}>
           <Image
             src="/FP_Logo.png"
             alt={`FairyPlace${TM}`}
             height={44}
             width={160}
             priority
-            style={{ width: "auto", height: 44 }}
+            style={{ width: "auto", height: 44, display: "block" }}
           />
         </div>
       </section>
