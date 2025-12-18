@@ -70,6 +70,10 @@ body {
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-secondary {
@@ -80,6 +84,10 @@ body {
   font-weight: 600;
   color: var(--primary);
   cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* DASHBOARD */
@@ -127,8 +135,9 @@ body {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 420px));
   gap: 24px;
+  justify-content: start;
 }
 
 .card {
@@ -136,17 +145,26 @@ body {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.card-media {
+  margin-top: 48px;
+  display: flex;
+  justify-content: center;
+}
+
+.card-actions {
+  margin-top: auto;
+  padding-top: 16px;
 }
 
 .card-title {
   font-size: 14px;
   color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.card-value {
-  font-size: 28px;
-  font-weight: 700;
+  margin: 16px 0 8px;
 }
 
 .badge {
