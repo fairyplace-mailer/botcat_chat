@@ -3,14 +3,29 @@
 import React, { useMemo, useRef, useState } from "react";
 import ChatWindow, { type Message as UIMessage } from "@/components/chat/ChatWindow";
 import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
+import type { BotCatAttachment } from "@/lib/botcat-attachment";
 
 export type ChatMessage = {
   id: string;
   role: "User" | "BotCat";
   content: string;
-  attachments?: MessageInputData["attachments"];
+  attachments?: BotCatAttachment[];
   createdAt: number;
 };
+
+function getOrCreateSessionId(): string {
+  const KEY = "botcat_session_id";
+  try {
+    const existing = window.localStorage.getItem(KEY);
+    if (existing) return existing;
+    const next = crypto.randomUUID();
+    window.localStorage.setItem(KEY, next);
+    return next;
+  } catch {
+    // If localStorage is unavailable (rare), fall back to an in-memory value.
+    return crypto.randomUUID();
+  }
+}
 
 function parseSSELineEvent(chunk: string) {
   // Minimal SSE parser for our simple protocol.
@@ -26,14 +41,17 @@ function parseSSELineEvent(chunk: string) {
     if (lines.length === 0) continue;
 
     let event: string | undefined;
-    let dataStr: string | undefined;
+    // SSE allows multiple `data:` lines per event.
+    const dataLines: string[] = [];
 
     for (const l of lines) {
       if (l.startsWith("event:")) event = l.slice("event:".length).trim();
-      if (l.startsWith("data:")) dataStr = l.slice("data:".length).trim();
+      if (l.startsWith("data:")) dataLines.push(l.slice("data:".length).trim());
     }
 
-    if (!dataStr) continue;
+    if (dataLines.length === 0) continue;
+
+    const dataStr = dataLines.join("\n");
     try {
       const data = JSON.parse(dataStr);
       events.push({ event, data });
@@ -49,7 +67,7 @@ function toChatWindowMessage(m: ChatMessage): UIMessage {
   return {
     author: m.role === "User" ? "user" : "bot",
     text: m.content,
-    attachments: (m.attachments ?? []) as any,
+    attachments: m.attachments ?? [],
   };
 }
 
@@ -106,6 +124,10 @@ export default function ChatPage() {
           chatName,
           message: userText,
           attachments,
+          client: {
+            sessionId: getOrCreateSessionId(),
+            userAgent: navigator.userAgent,
+          },
         }),
       });
 
