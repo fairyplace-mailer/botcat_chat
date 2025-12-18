@@ -2,54 +2,312 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light theme – BotCat Consultant */
-:root {
-  --background: #f7f7f5;
-  --foreground: #1c1c1a;
-  --muted: #efede8;
-  --muted-foreground: #4a4a47;
-  --border: #d9d7d2;
-  --input: #d9d7d2;
-  --ring: #3da4a1;
-  --primary: #3da4a1;
-  --primary-foreground: #ffffff;
-  --secondary: #4e6e81;
-  --secondary-foreground: #ffffff;
-  --accent: #c8794d;
-  --accent-foreground: #ffffff;
-  --destructive: #d95c4a;
-  --destructive-foreground: #ffffff;
-  --success: #3faf72;
-  --warning: #efb55a;
-  --info: #5aa7c8;
+/*
+  Enterprise SaaS palette (auto theme via prefers-color-scheme)
+  Rules:
+  - Blue = actions/links
+  - Yellow = rare brand accent
+  - Greys = base UI
+*/
 
-  /* Chat bubbles */
-  --chat-user-bg: #3da4a1;
-  --chat-bot-bg: #efede8;
+:root {
+  /* Light */
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --primary: #1f2937;
+  --secondary: #374151;
+  --action: #2563eb;
+  --brand: #f2c94c;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border: #e2e8f0;
 }
 
-/* Dark theme – BotCat Consultant */
-.dark {
-  --background: #181a1a;
-  --foreground: #ededeb;
-  --muted: #202322;
-  --muted-foreground: #c7c7c4;
-  --border: #2a2d2c;
-  --input: #2a2d2c;
-  --ring: #5cc6c3;
-  --primary: #5cc6c3;
-  --primary-foreground: #181a1a;
-  --secondary: #6f8fa3;
-  --secondary-foreground: #181a1a;
-  --accent: #e0915e;
-  --accent-foreground: #181a1a;
-  --destructive: #d95c4a;
-  --destructive-foreground: #181a1a;
-  --success: #3faf72;
-  --warning: #efb55a;
-  --info: #5aa7c8;
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Dark */
+    --bg: #0a0e14;
+    --surface: #111827;
+    --primary: #e5e7eb;
+    --secondary: #9ca3af;
+    --action: #3b82f6;
+    --brand: #f2c94c;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --border: #1f2937;
+  }
+}
 
-  /* Chat bubbles */
-  --chat-user-bg: #5cc6c3;
-  --chat-bot-bg: #202322;
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+/* Nice default focus */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--action) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/*
+  Homepage (1:1 with provided Enterprise SaaS example)
+*/
+
+.hero {
+  padding: 80px 64px;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f7fa 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.hero h1 {
+  font-size: 40px;
+  margin: 0 0 16px;
+  /* widen by ~25% to reach 2 lines on common widths */
+  max-width: 1025px;
+}
+
+.hero p {
+  font-size: 18px;
+  color: var(--text-secondary);
+  /* paragraph width */
+  max-width: 820px;
+  margin: 0;
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 80vh;
+}
+
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 24px;
+}
+
+.sidebar h3 {
+  font-size: 14px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+/* Enterprise nav behaviour: no active, only hover/focus */
+.nav-item {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--primary);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-item:visited {
+  color: var(--primary);
+}
+
+.nav-item:hover,
+.nav-item:focus-visible {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--action);
+  font-weight: 600;
+  outline: none;
+}
+
+.content {
+  padding: 32px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.card--square {
+  /* keep height, reduce width toward square */
+  aspect-ratio: 1 / 1;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+.card--instant {
+  /* increase distance between sidebar and the first (left) card */
+  margin-left: 48px;
+}
+
+.card-title {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+
+.card-media {
+  display: flex;
+  justify-content: center;
+  /* push image+text down */
+  margin-top: 48px;
+  margin-bottom: 16px;
+}
+
+.card-actions {
+  margin-top: auto;
+}
+
+.btn-primary {
+  display: inline-block;
+  background: var(--action);
+  color: #fff;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-secondary {
+  display: inline-block;
+  background: transparent;
+  border: 1px solid var(--border);
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+/*
+  Chat input (BotCow-like layout)
+*/
+
+.message-input_wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-input_row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.message-input_textarea {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  resize: none;
+  overflow: auto;
+  box-sizing: border-box;
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.message-input_attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message-input_attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.message-input_attachment a {
+  color: var(--action);
+  text-decoration: none;
+}
+
+.message-input_attachment a:hover {
+  text-decoration: underline;
+}
+
+.message-input_error {
+  color: #dc2626;
+  font-size: 13px;
+}
+
+.message-input_uploading {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.message-input_attach {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* Responsive: stack dashboard */
+@media (max-width: 960px) {
+  .hero {
+    padding: 64px 24px;
+  }
+
+  .dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .cards {
+    grid-template-columns: 1fr;
+  }
+
+  .card--square {
+    max-width: 520px;
+  }
+
+  .card--instant {
+    margin-left: 0;
+  }
+
+  .card-media {
+    margin-top: 32px;
+  }
 }

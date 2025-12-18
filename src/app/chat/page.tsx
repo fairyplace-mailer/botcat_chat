@@ -1,16 +1,32 @@
 "use client";
 
 import React, { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import ChatWindow, { type Message as UIMessage } from "@/components/chat/ChatWindow";
 import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
+import type { BotCatAttachment } from "@/lib/botcat-attachment";
 
 export type ChatMessage = {
   id: string;
   role: "User" | "BotCat";
   content: string;
-  attachments?: MessageInputData["attachments"];
+  attachments?: BotCatAttachment[];
   createdAt: number;
 };
+
+function getOrCreateSessionId(): string {
+  const KEY = "botcat_session_id";
+  try {
+    const existing = window.localStorage.getItem(KEY);
+    if (existing) return existing;
+    const next = crypto.randomUUID();
+    window.localStorage.setItem(KEY, next);
+    return next;
+  } catch {
+    // If localStorage is unavailable (rare), fall back to an in-memory value.
+    return crypto.randomUUID();
+  }
+}
 
 function parseSSELineEvent(chunk: string) {
   // Minimal SSE parser for our simple protocol.
@@ -26,14 +42,17 @@ function parseSSELineEvent(chunk: string) {
     if (lines.length === 0) continue;
 
     let event: string | undefined;
-    let dataStr: string | undefined;
+    // SSE allows multiple `data:` lines per event.
+    const dataLines: string[] = [];
 
     for (const l of lines) {
       if (l.startsWith("event:")) event = l.slice("event:".length).trim();
-      if (l.startsWith("data:")) dataStr = l.slice("data:".length).trim();
+      if (l.startsWith("data:")) dataLines.push(l.slice("data:".length).trim());
     }
 
-    if (!dataStr) continue;
+    if (dataLines.length === 0) continue;
+
+    const dataStr = dataLines.join("\n");
     try {
       const data = JSON.parse(dataStr);
       events.push({ event, data });
@@ -49,11 +68,13 @@ function toChatWindowMessage(m: ChatMessage): UIMessage {
   return {
     author: m.role === "User" ? "user" : "bot",
     text: m.content,
-    attachments: (m.attachments ?? []) as any,
+    attachments: m.attachments ?? [],
   };
 }
 
 export default function ChatPage() {
+  const TM = "\u2122";
+
   const [chatName, setChatName] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -106,6 +127,10 @@ export default function ChatPage() {
           chatName,
           message: userText,
           attachments,
+          client: {
+            sessionId: getOrCreateSessionId(),
+            userAgent: navigator.userAgent,
+          },
         }),
       });
 
@@ -180,22 +205,81 @@ export default function ChatPage() {
   const chatWindowMessages = useMemo(() => messages.map(toChatWindowMessage), [messages]);
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <h1 style={{ margin: 0 }}>FairyPlace BotCat (v1.0)</h1>
-        <button type="button" onClick={newChat} disabled={!canReset || isStreaming}>
-          New Chat
-        </button>
-      </div>
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "var(--bg)",
+        padding: 24,
+      }}
+    >
+      {/* Right-aligned container: 85% width, full height */}
+      <div
+        style={{
+          width: "85vw",
+          marginLeft: "auto",
+          display: "flex",
+          flexDirection: "column",
+          height: "calc(100vh - 48px)",
+          gap: 16,
+        }}
+      >
+        {/* Header */}
+        <header
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: "12px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+            <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>
+              {`BotCat${TM} Instant (v1.0)`}
+            </div>
+            {chatName ? (
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{chatName}</div>
+            ) : null}
+          </div>
 
-      {error ? <div style={{ marginTop: 12, color: "#b00020" }}>Error: {error}</div> : null}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Link href="/" className="btn-secondary">
+              Home
+            </Link>
+            <button type="button" onClick={newChat} disabled={!canReset || isStreaming} className="btn-primary">
+              New Chat
+            </button>
+          </div>
+        </header>
 
-      <div ref={listRef} style={{ height: "65vh", overflow: "auto", marginTop: 12 }}>
-        <ChatWindow messages={chatWindowMessages} isTyping={isStreaming} />
-      </div>
+        {error ? (
+          <div style={{ color: "#b00020", fontSize: 14 }}>Error: {error}</div>
+        ) : null}
 
-      <div style={{ marginTop: 12 }}>
-        <MessageInput onSend={sendToApi} disabled={isStreaming} loading={isStreaming} />
+        {/* Chat area */}
+        <section
+          style={{
+            flex: 1,
+            minHeight: 0,
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <div ref={listRef} style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+            <ChatWindow messages={chatWindowMessages} isTyping={isStreaming} />
+          </div>
+
+          <div style={{ padding: 12, borderTop: "1px solid var(--border)" }}>
+            <MessageInput onSend={sendToApi} disabled={isStreaming} loading={isStreaming} />
+          </div>
+        </section>
       </div>
     </main>
   );

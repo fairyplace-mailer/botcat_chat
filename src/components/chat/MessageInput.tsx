@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { BotCatAttachment } from "@/lib/botcat-attachment";
 
@@ -15,18 +15,25 @@ export interface MessageInputProps {
   loading?: boolean;
 }
 
-// Stage v1.0: allow common file types that OpenAI can consume.
-// We keep it relatively permissive per spec.
+// v1.0 allowed file types (ChatGPT-like, except code):
+// - Text: txt, md, pdf, docx, rtf
+// - Data: csv, xlsx, json
+// - Images: png, jpg/jpeg, webp
+// - Archives: zip
 const ACCEPT_MIME = [
+  "text/plain",
+  "text/markdown",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+  "application/rtf",
+  "text/csv",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
+  "application/json",
   "image/png",
   "image/jpeg",
   "image/webp",
-  "image/gif",
-  "application/pdf",
-  "text/csv",
-  "text/plain",
-  "application/json",
-];
+  "application/zip",
+] as const;
 
 type UploadingItem = {
   id: string;
@@ -35,33 +42,73 @@ type UploadingItem = {
   progress: number;
 };
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
 export function MessageInput(props: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<BotCatAttachment[]>([]);
   const [uploading, setUploading] = useState<UploadingItem[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const isBusy = props.disabled || props.loading || uploading.length > 0;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
 
+  const isBusy = Boolean(props.disabled || props.loading || uploading.length > 0);
   const acceptAttr = useMemo(() => ACCEPT_MIME.join(","), []);
 
-  function onDrop(e: React.DragEvent) {
-    e.preventDefault();
-    if (isBusy) return;
-    const files = Array.from(e.dataTransfer.files);
-    void handleFiles(files);
+  function getMaxHeightPx(): number {
+    const ta = taRef.current;
+    if (!ta || typeof window === "undefined") return 0;
+
+    const style = window.getComputedStyle(ta);
+    const lineHeight =
+      parseFloat(style.lineHeight) ||
+      (parseFloat(style.fontSize) * 1.2) ||
+      18;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const paddingBottom = parseFloat(style.paddingBottom) || 0;
+    const borderTop = parseFloat(style.borderTopWidth) || 0;
+    const borderBottom = parseFloat(style.borderBottomWidth) || 0;
+
+    // 6 lines max like in botcow
+    return Math.round(
+      lineHeight * 6 + paddingTop + paddingBottom + borderTop + borderBottom,
+    );
   }
 
-  function onDragOver(e: React.DragEvent) {
-    e.preventDefault();
+  function adjustHeight() {
+    const ta = taRef.current;
+    if (!ta) return;
+
+    ta.style.height = "auto";
+    const maxH = getMaxHeightPx();
+    const nextH = Math.min(ta.scrollHeight, maxH || ta.scrollHeight);
+    ta.style.height = `${nextH}px`;
+
+    if (ta.scrollHeight > (maxH || Infinity)) {
+      ta.scrollTop = ta.scrollHeight;
+    }
   }
+
+  useLayoutEffect(() => {
+    adjustHeight();
+
+    function onResize() {
+      adjustHeight();
+    }
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message]);
 
   async function handleFiles(files: File[]) {
     setError(null);
 
     for (const file of files) {
-      if (!file.type || !ACCEPT_MIME.includes(file.type)) {
+      if (!file.type || !ACCEPT_MIME.includes(file.type as any)) {
         setError(`File type not allowed: ${file.name} (${file.type || "unknown"})`);
         continue;
       }
@@ -77,10 +124,13 @@ export function MessageInput(props: MessageInputProps) {
           access: "public",
           handleUploadUrl: "/api/blob/upload",
           contentType: file.type,
-          // Best-effort UI progress.
           onUploadProgress: (p) => {
             setUploading((prev) =>
-              prev.map((u) => (u.id === uploadId ? { ...u, progress: p.percentage } : u)),
+              prev.map((u) =>
+                u.id === uploadId
+                  ? { ...u, progress: clamp(p.percentage, 0, 100) }
+                  : u,
+              ),
             );
           },
         });
@@ -89,7 +139,7 @@ export function MessageInput(props: MessageInputProps) {
           ...prev,
           {
             attachmentId: crypto.randomUUID(),
-            // Message id is created server-side; for UI we keep empty.
+            // messageId assigned server-side; UI keeps a placeholder.
             messageId: "ui-memory",
             kind: "user_upload",
             fileName: file.name || null,
@@ -101,7 +151,7 @@ export function MessageInput(props: MessageInputProps) {
             blobUrlPreview: null,
           },
         ]);
-      } catch (e: any) {
+      } catch {
         setError(`Upload failed: ${file.name}`);
       } finally {
         setUploading((prev) => prev.filter((u) => u.id !== uploadId));
@@ -113,8 +163,15 @@ export function MessageInput(props: MessageInputProps) {
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files) return;
-    const files = Array.from(e.target.files);
-    void handleFiles(files);
+    void handleFiles(Array.from(e.target.files));
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // BotCow behaviour: Enter = send, Shift+Enter = newline
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      onSendClick();
+    }
   }
 
   function removeAttachment(idx: number) {
@@ -122,65 +179,18 @@ export function MessageInput(props: MessageInputProps) {
   }
 
   function onSendClick() {
+    if (isBusy) return;
     if (!message.trim() && attachments.length === 0) return;
-    props.onSend({ message, attachments });
+
+    props.onSend({ message: message.trim(), attachments });
     setMessage("");
     setAttachments([]);
     setError(null);
   }
 
   return (
-    <div className="message-input_wrapper" onDrop={onDrop} onDragOver={onDragOver}>
-      <textarea
-        className="message-input_textarea"
-        placeholder="Type a message…"
-        value={message}
-        disabled={isBusy}
-        onChange={(e) => setMessage(e.target.value)}
-        rows={1}
-        style={{ resize: "vertical" }}
-      />
-
-      <input
-        type="file"
-        ref={fileInputRef}
-        multiple
-        accept={acceptAttr}
-        style={{ display: "none" }}
-        onChange={onFileChange}
-        disabled={isBusy}
-      />
-
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={isBusy}
-        aria-label="Attach files"
-      >
-        +
-      </button>
-
-      <button
-        type="button"
-        onClick={onSendClick}
-        disabled={isBusy || (!message.trim() && attachments.length === 0)}
-        aria-label="Send message"
-      >
-        Send
-      </button>
-
-      {error ? <div className="message-input_error">{error}</div> : null}
-
-      {uploading.length > 0 ? (
-        <div className="message-input_uploading">
-          {uploading.map((u) => (
-            <div key={u.id}>
-              Uploading {u.name}… {Math.round(u.progress)}%
-            </div>
-          ))}
-        </div>
-      ) : null}
-
+    <div className="message-input_wrapper">
+      {/* Attachments chips */}
       {attachments.length > 0 ? (
         <div className="message-input_attachments">
           {attachments.map((att, idx) => (
@@ -192,14 +202,75 @@ export function MessageInput(props: MessageInputProps) {
               >
                 {att.fileName || "attachment"}
               </a>
-              {att.mimeType ? <span> ({att.mimeType})</span> : null}
-              <button type="button" onClick={() => removeAttachment(idx)} disabled={isBusy}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => removeAttachment(idx)}
+                disabled={isBusy}
+              >
                 Remove
               </button>
             </div>
           ))}
         </div>
       ) : null}
+
+      {uploading.length > 0 ? (
+        <div className="message-input_uploading">
+          {uploading.map((u) => (
+            <div key={u.id}>
+              Uploading {u.name} {Math.round(u.progress)}%
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {error ? <div className="message-input_error">{error}</div> : null}
+
+      <div className="message-input_row">
+        <input
+          type="file"
+          ref={fileInputRef}
+          multiple
+          accept={acceptAttr}
+          style={{ display: "none" }}
+          onChange={onFileChange}
+          disabled={isBusy}
+        />
+
+        <button
+          type="button"
+          className="btn-secondary message-input_attach"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isBusy}
+          aria-label="Attach files"
+          title="Attach files"
+        >
+          +
+        </button>
+
+        <textarea
+          ref={taRef}
+          rows={1}
+          className="message-input_textarea"
+          placeholder="Type a message"
+          value={message}
+          disabled={isBusy}
+          onChange={(e) => setMessage(e.target.value)}
+          onInput={adjustHeight}
+          onKeyDown={onKeyDown}
+        />
+
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={onSendClick}
+          disabled={isBusy || (!message.trim() && attachments.length === 0)}
+          aria-label="Send message"
+        >
+          {props.loading ? "Waiting" : "Send"}
+        </button>
+      </div>
     </div>
   );
 }
