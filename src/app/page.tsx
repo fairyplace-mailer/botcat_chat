@@ -40,9 +40,9 @@ export default function HomePage() {
               {`BotCat${TM} by FairyPlace${TM} helps you create bespoke surface designs for fabric, wallpaper, and leather`}
             </h1>
             <p className="hero-p">
-              From concept to approved sketches, you receive private print-on-demand links
-              with partners such as Spoonflower, Contrado, and others. The design is free;
-              you pay only POD partners for production.
+              From concept to approved sketches, you receive print-on-demand links with
+              partners such as Spoonflower, Contrado, and others. The design is free; you
+              pay only POD partners for production.
             </p>
           </div>
 
@@ -79,14 +79,14 @@ export default function HomePage() {
               <div className="card-media">
                 <Image
                   src="/BotCat_Portrait_512.png"
-                  alt="BotCat — Instant"
+                  alt="BotCat  Instant"
                   width={173}
                   height={173}
                   style={{ width: "auto", height: 173 }}
                 />
               </div>
               <div className="card-title">
-                <strong>BotCat — Instant</strong> Free bespoke surface design consultant using
+                <strong>BotCat  Instant</strong> Free bespoke surface design consultant using
                 proven, cost-efficient AI models. No signup required. Fast concepts and
                 sketches, with POD links for production.
               </div>
@@ -101,14 +101,14 @@ export default function HomePage() {
               <div className="card-media">
                 <Image
                   src="/BotCat_PRO_512.png"
-                  alt="BotCat — Pro"
+                  alt="BotCat  Pro"
                   width={173}
                   height={173}
                   style={{ width: "auto", height: 173 }}
                 />
               </div>
               <div className="card-title">
-                <strong>BotCat — Pro (signup required)</strong> Free bespoke design consultant
+                <strong>BotCat  Pro (signup required)</strong> Free bespoke design consultant
                 powered by the latest OpenAI models. Registration required. Higher accuracy,
                 deeper iterations, and downloadable transcripts of past conversations.
               </div>
