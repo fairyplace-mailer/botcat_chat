@@ -95,7 +95,7 @@ export default function HomePage() {
                 />
               </div>
               <div className="card-title">
-                <strong>{`BotCat${TM}  Instant`}</strong> Free bespoke surface design consultant using
+                <strong>{`BotCat${TM} Instant`}</strong> Free bespoke surface design consultant using
                 proven, cost-efficient AI models. No signup required. Fast concepts and
                 sketches.
               </div>
@@ -117,7 +117,7 @@ export default function HomePage() {
                 />
               </div>
               <div className="card-title">
-                <strong>{`BotCat${TM}  Pro (signup required)`}</strong> Free bespoke design consultant
+                <strong>{`BotCat${TM} Pro (signup required)`}</strong> Free bespoke design consultant
                 powered by the latest OpenAI models. Registration required. Higher accuracy,
                 deeper iterations, and downloadable transcripts of past conversations.
               </div>
