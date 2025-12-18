@@ -26,6 +26,8 @@ const NAV_ITEMS: Array<{ label: string; href: string }> = [
   { label: "Privacy Policy", href: "https://www.fairyplace.biz/privacy-policy" },
 ];
 
+const TM = "\u2122";
+
 export default function HomePage() {
   const activeIndex = 0;
 
@@ -35,8 +37,7 @@ export default function HomePage() {
         <div className="hero-head">
           <div>
             <h1>
-              BotCat\u2122 by FairyPlace\u2122 helps you create bespoke surface designs for fabric,
-              wallpaper, and leather
+              {`BotCat${TM} by FairyPlace${TM} helps you create bespoke surface designs for fabric, wallpaper, and leather`}
             </h1>
             <p className="hero-p">
               From concept to approved sketches, you receive private print-on-demand links
@@ -47,7 +48,7 @@ export default function HomePage() {
 
           <Image
             src="/FP_Logo.png"
-            alt={`FairyPlace\u2122`}
+            alt={`FairyPlace${TM}`}
             height={44}
             width={160}
             priority
