@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -32,7 +35,7 @@ const NAV_ITEMS: Array<{ label: string; href: string }> = [
 const TM = "\u2122";
 
 export default function HomePage() {
-  const activeIndex = 0;
+  const [activeIndex, setActiveIndex] = useState<number>(0);
 
   return (
     <main>
@@ -71,6 +74,7 @@ export default function HomePage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`nav-item${idx === activeIndex ? " active" : ""}`}
+                onClick={() => setActiveIndex(idx)}
               >
                 {item.label}
               </a>
