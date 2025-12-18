@@ -17,7 +17,10 @@ const NAV_ITEMS: Array<{ label: string; href: string }> = [
     label: "Upholstery Experts",
     href: "https://www.fairyplace.biz/upholstery-experts",
   },
-  { label: "Events Organizers", href: "https://www.fairyplace.biz/events-organizers" },
+  {
+    label: "Events Organizers",
+    href: "https://www.fairyplace.biz/events-organizers",
+  },
   { label: "Home Decor", href: "https://www.fairyplace.biz/home-decor" },
   {
     label: "Spas, Fitness, Beauty",
@@ -79,16 +82,16 @@ export default function HomePage() {
               <div className="card-media">
                 <Image
                   src="/BotCat_Portrait_512.png"
-                  alt="BotCat  Instant"
+                  alt={`BotCat${TM} Instant`}
                   width={173}
                   height={173}
                   style={{ width: "auto", height: 173 }}
                 />
               </div>
               <div className="card-title">
-                <strong>BotCat  Instant</strong> Free bespoke surface design consultant using
+                <strong>{`BotCat${TM} — Instant`}</strong> Free bespoke surface design consultant using
                 proven, cost-efficient AI models. No signup required. Fast concepts and
-                sketches, with POD links for production.
+                sketches.
               </div>
               <div className="card-actions">
                 <Link className="btn-primary" href="/chat">
@@ -101,14 +104,14 @@ export default function HomePage() {
               <div className="card-media">
                 <Image
                   src="/BotCat_PRO_512.png"
-                  alt="BotCat  Pro"
+                  alt={`BotCat${TM} Pro`}
                   width={173}
                   height={173}
                   style={{ width: "auto", height: 173 }}
                 />
               </div>
               <div className="card-title">
-                <strong>BotCat  Pro (signup required)</strong> Free bespoke design consultant
+                <strong>{`BotCat${TM} — Pro (signup required)`}</strong> Free bespoke design consultant
                 powered by the latest OpenAI models. Registration required. Higher accuracy,
                 deeper iterations, and downloadable transcripts of past conversations.
               </div>
