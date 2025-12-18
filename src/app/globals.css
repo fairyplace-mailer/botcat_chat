@@ -36,12 +36,6 @@
     --text-secondary: #cbd5e1;
     --border: #1f2937;
   }
-
-  /* Hero needs a dark gradient; otherwise it stays light and secondary text becomes unreadable */
-  .hero {
-    background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
-    border-bottom: 1px solid var(--border);
-  }
 }
 
 * {
@@ -69,6 +63,14 @@ body {
   padding: 80px 64px;
   background: linear-gradient(180deg, #ffffff 0%, #f5f7fa 100%);
   border-bottom: 1px solid var(--border);
+}
+
+/* IMPORTANT: place the dark override AFTER the light .hero rule so it wins in the cascade */
+@media (prefers-color-scheme: dark) {
+  .hero {
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 .hero-head {
