@@ -1,6 +1,3 @@
-"use client";
-
-import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -35,8 +32,6 @@ const NAV_ITEMS: Array<{ label: string; href: string }> = [
 const TM = "\u2122";
 
 export default function HomePage() {
-  const [activeIndex, setActiveIndex] = useState<number>(0);
-
   return (
     <main>
       <section className="hero">
@@ -67,14 +62,13 @@ export default function HomePage() {
         <aside className="sidebar">
           <h3>Navigation</h3>
           <nav aria-label="FairyPlace navigation">
-            {NAV_ITEMS.map((item, idx) => (
+            {NAV_ITEMS.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`nav-item${idx === activeIndex ? " active" : ""}`}
-                onClick={() => setActiveIndex(idx)}
+                className="nav-item"
               >
                 {item.label}
               </a>
