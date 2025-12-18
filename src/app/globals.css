@@ -179,6 +179,83 @@ body {
   margin-left: 8px;
 }
 
+/* Chat input (BotCat v1.0): isolate from home/dashboard styles */
+.message-input_wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-input_row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.message-input_attach {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.message-input_textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 200px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 18px;
+  resize: none;
+  outline: none;
+}
+
+.message-input_textarea:focus {
+  border-color: rgba(37, 99, 235, 0.6);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.message-input_attachments {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.message-input_attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.message-input_attachment a {
+  color: var(--action);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.message-input_attachment a:hover {
+  text-decoration: underline;
+}
+
+.message-input_uploading {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.message-input_error {
+  font-size: 12px;
+  color: #b00020;
+}
+
 /* Dark-mode overrides placed after base rules so they win in cascade */
 @media (prefers-color-scheme: dark) {
   .hero {
@@ -202,5 +279,10 @@ body {
   .nav-item:focus-visible {
     background: rgba(59, 130, 246, 0.14);
     color: var(--action);
+  }
+
+  .message-input_textarea {
+    background: var(--surface);
+    color: var(--text-primary);
   }
 }
