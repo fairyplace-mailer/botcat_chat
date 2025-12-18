@@ -35,10 +35,10 @@ export default function HomePage() {
         <div className="hero-head">
           <div>
             <h1>
-              BotCat by FairyPlace helps you create bespoke surface designs for fabric,
+              BotCat\u2122 by FairyPlace\u2122 helps you create bespoke surface designs for fabric,
               wallpaper, and leather
             </h1>
-            <p>
+            <p className="hero-p">
               From concept to approved sketches, you receive private print-on-demand links
               with partners such as Spoonflower, Contrado, and others. The design is free;
               you pay only POD partners for production.
@@ -47,7 +47,7 @@ export default function HomePage() {
 
           <Image
             src="/FP_Logo.png"
-            alt="FairyPlace"
+            alt={`FairyPlace\u2122`}
             height={44}
             width={160}
             priority
@@ -74,14 +74,14 @@ export default function HomePage() {
 
         <main className="content">
           <div className="cards">
-            <div className="card card--square" aria-label="BotCat Instant">
+            <div className="card card--square card--instant" aria-label="BotCat Instant">
               <div className="card-media">
                 <Image
                   src="/BotCat_Portrait_512.png"
                   alt="BotCat — Instant"
-                  width={128}
-                  height={128}
-                  style={{ width: "auto", height: 128 }}
+                  width={173}
+                  height={173}
+                  style={{ width: "auto", height: 173 }}
                 />
               </div>
               <div className="card-title">
@@ -101,9 +101,9 @@ export default function HomePage() {
                 <Image
                   src="/BotCat_PRO_512.png"
                   alt="BotCat — Pro"
-                  width={128}
-                  height={128}
-                  style={{ width: "auto", height: 128 }}
+                  width={173}
+                  height={173}
+                  style={{ width: "auto", height: 173 }}
                 />
               </div>
               <div className="card-title">
