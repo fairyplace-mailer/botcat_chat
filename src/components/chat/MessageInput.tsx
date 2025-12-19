@@ -3,9 +3,9 @@ import { upload } from "@vercel/blob/client";
 import { BotCatAttachment } from "@/lib/botcat-attachment";
 import {
   DEFAULT_EXTRACTION_LIMITS,
-  extractTextFromDocx,
-  extractTextFromPdf,
-  extractTextFromPlainTextFile,
+  extractDocxText,
+  extractPdfText,
+  extractTextFromTextLikeFile,
 } from "./document-extractors";
 
 export type { BotCatAttachment };
@@ -74,12 +74,12 @@ async function extractDocumentText(file: File): Promise<string | null> {
     file.type === "application/json" ||
     file.type === "text/csv"
   ) {
-    return extractTextFromPlainTextFile(file, limits);
+    return extractTextFromTextLikeFile(file, limits);
   }
 
   // PDF
   if (file.type === "application/pdf") {
-    return extractTextFromPdf(file, limits);
+    return extractPdfText(file, limits);
   }
 
   // DOCX
@@ -87,7 +87,7 @@ async function extractDocumentText(file: File): Promise<string | null> {
     file.type ===
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ) {
-    return extractTextFromDocx(file, limits);
+    return extractDocxText(file, limits);
   }
 
   // RTF/XLSX/ZIP: not supported in Stage 1 (would require heavier processing)
