@@ -1,6 +1,12 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { BotCatAttachment } from "@/lib/botcat-attachment";
+import {
+  DEFAULT_EXTRACTION_LIMITS,
+  extractTextFromDocx,
+  extractTextFromPdf,
+  extractTextFromPlainTextFile,
+} from "./document-extractors";
 
 export type { BotCatAttachment };
 
@@ -58,33 +64,33 @@ function isImageMime(mime: string | null | undefined): boolean {
   return Boolean(mime && mime.startsWith("image/"));
 }
 
-/**
- * Stage 1 rule (docs/spec.md): non-image files are not passed to LLM by URL.
- * The UI must provide extracted text.
- *
- * NOTE: In this repo we keep extraction minimal and safe for Vercel Hobby:
- * - text-like formats: read as text and trim
- * - pdf/docx: will be implemented with pdf.js/mammoth in a follow-up commit
- */
 async function extractDocumentText(file: File): Promise<string | null> {
-  // simple text-like formats
-  const textMimes = new Set([
-    "text/plain",
-    "text/markdown",
-    "application/json",
-    "text/csv",
-  ]);
+  const limits = DEFAULT_EXTRACTION_LIMITS;
 
-  if (textMimes.has(file.type)) {
-    const t = await file.text();
-    // hard cap to avoid huge payloads
-    const MAX_CHARS = 20_000;
-    return t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t;
+  // plain text formats
+  if (
+    file.type === "text/plain" ||
+    file.type === "text/markdown" ||
+    file.type === "application/json" ||
+    file.type === "text/csv"
+  ) {
+    return extractTextFromPlainTextFile(file, limits);
   }
 
-  // TODO(Stage 1): implement
-  // - application/pdf via pdf.js
-  // - docx via mammoth
+  // PDF
+  if (file.type === "application/pdf") {
+    return extractTextFromPdf(file, limits);
+  }
+
+  // DOCX
+  if (
+    file.type ===
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    return extractTextFromDocx(file, limits);
+  }
+
+  // RTF/XLSX/ZIP: not supported in Stage 1 (would require heavier processing)
   return null;
 }
 
@@ -199,17 +205,24 @@ export function MessageInput(props: MessageInputProps) {
 
         // Extract text for non-image files (Stage 1 requirement).
         if (!isImageMime(file.type)) {
-          const text = await extractDocumentText(file);
-          if (text) {
-            setExtractedDocuments((prev) => [
-              ...prev,
-              {
-                attachmentId,
-                fileName: file.name || null,
-                mimeType: file.type || null,
-                text,
-              },
-            ]);
+          try {
+            const text = await extractDocumentText(file);
+            if (text) {
+              setExtractedDocuments((prev) => [
+                ...prev,
+                {
+                  attachmentId,
+                  fileName: file.name || null,
+                  mimeType: file.type || null,
+                  text,
+                },
+              ]);
+            }
+          } catch {
+            // Extraction failure should not block sending.
+            setError(
+              `Text extraction failed for: ${file.name}. You can still send the file, but the model will not read it.`,
+            );
           }
         }
       } catch {
