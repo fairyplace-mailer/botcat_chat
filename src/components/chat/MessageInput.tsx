@@ -72,6 +72,10 @@ function isAllowedMime(mime: string | null | undefined): mime is AcceptMime {
   return Boolean(mime && (ACCEPT_MIME as readonly string[]).includes(mime));
 }
 
+function wasTrimmed(text: string): boolean {
+  return text.includes("[TRIMMED]");
+}
+
 async function extractDocumentText(file: File): Promise<string | null> {
   const limits = DEFAULT_EXTRACTION_LIMITS;
 
@@ -259,7 +263,9 @@ export function MessageInput(props: MessageInputProps) {
     const att = attachments[idx];
     setAttachments((a) => a.filter((_, i) => i !== idx));
     if (att) {
-      setExtractedDocuments((docs) => docs.filter((d) => d.attachmentId !== att.attachmentId));
+      setExtractedDocuments((docs) =>
+        docs.filter((d) => d.attachmentId !== att.attachmentId),
+      );
     }
   }
 
@@ -273,6 +279,19 @@ export function MessageInput(props: MessageInputProps) {
     setExtractedDocuments([]);
     setError(null);
   }
+
+  const extractedSummary = useMemo(() => {
+    if (extractedDocuments.length === 0) return null;
+
+    const docs = extractedDocuments.map((d) => {
+      const name = d.fileName ?? "document";
+      const trimmed = wasTrimmed(d.text);
+      const chars = d.text.length;
+      return `${name} — ${chars} chars${trimmed ? " (trimmed)" : ""}`;
+    });
+
+    return docs.join("; ");
+  }, [extractedDocuments]);
 
   return (
     <div className="message-input_wrapper">
@@ -308,6 +327,12 @@ export function MessageInput(props: MessageInputProps) {
               Uploading {u.name} {Math.round(u.progress)}%
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {extractedSummary ? (
+        <div className="message-input_uploading">
+          Extracted: {extractedSummary}
         </div>
       ) : null}
 
