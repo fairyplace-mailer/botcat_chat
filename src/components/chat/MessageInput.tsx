@@ -4,9 +4,17 @@ import { BotCatAttachment } from "@/lib/botcat-attachment";
 
 export type { BotCatAttachment };
 
+export type ExtractedDocument = {
+  attachmentId: string;
+  fileName: string | null;
+  mimeType: string | null;
+  text: string;
+};
+
 export type MessageInputData = {
   message: string;
   attachments?: BotCatAttachment[];
+  extractedDocuments?: ExtractedDocument[];
 };
 
 export interface MessageInputProps {
@@ -46,9 +54,44 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function isImageMime(mime: string | null | undefined): boolean {
+  return Boolean(mime && mime.startsWith("image/"));
+}
+
+/**
+ * Stage 1 rule (docs/spec.md): non-image files are not passed to LLM by URL.
+ * The UI must provide extracted text.
+ *
+ * NOTE: In this repo we keep extraction minimal and safe for Vercel Hobby:
+ * - text-like formats: read as text and trim
+ * - pdf/docx: will be implemented with pdf.js/mammoth in a follow-up commit
+ */
+async function extractDocumentText(file: File): Promise<string | null> {
+  // simple text-like formats
+  const textMimes = new Set([
+    "text/plain",
+    "text/markdown",
+    "application/json",
+    "text/csv",
+  ]);
+
+  if (textMimes.has(file.type)) {
+    const t = await file.text();
+    // hard cap to avoid huge payloads
+    const MAX_CHARS = 20_000;
+    return t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t;
+  }
+
+  // TODO(Stage 1): implement
+  // - application/pdf via pdf.js
+  // - docx via mammoth
+  return null;
+}
+
 export function MessageInput(props: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<BotCatAttachment[]>([]);
+  const [extractedDocuments, setExtractedDocuments] = useState<ExtractedDocument[]>([]);
   const [uploading, setUploading] = useState<UploadingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,6 +162,8 @@ export function MessageInput(props: MessageInputProps) {
         { id: uploadId, name: file.name, type: file.type, progress: 0 },
       ]);
 
+      const attachmentId = crypto.randomUUID();
+
       try {
         const blob = await upload(file.name, file, {
           access: "public",
@@ -138,7 +183,7 @@ export function MessageInput(props: MessageInputProps) {
         setAttachments((prev) => [
           ...prev,
           {
-            attachmentId: crypto.randomUUID(),
+            attachmentId,
             // messageId assigned server-side; UI keeps a placeholder.
             messageId: "ui-memory",
             kind: "user_upload",
@@ -151,6 +196,22 @@ export function MessageInput(props: MessageInputProps) {
             blobUrlPreview: null,
           },
         ]);
+
+        // Extract text for non-image files (Stage 1 requirement).
+        if (!isImageMime(file.type)) {
+          const text = await extractDocumentText(file);
+          if (text) {
+            setExtractedDocuments((prev) => [
+              ...prev,
+              {
+                attachmentId,
+                fileName: file.name || null,
+                mimeType: file.type || null,
+                text,
+              },
+            ]);
+          }
+        }
       } catch {
         setError(`Upload failed: ${file.name}`);
       } finally {
@@ -175,16 +236,21 @@ export function MessageInput(props: MessageInputProps) {
   }
 
   function removeAttachment(idx: number) {
+    const att = attachments[idx];
     setAttachments((a) => a.filter((_, i) => i !== idx));
+    if (att) {
+      setExtractedDocuments((docs) => docs.filter((d) => d.attachmentId !== att.attachmentId));
+    }
   }
 
   function onSendClick() {
     if (isBusy) return;
     if (!message.trim() && attachments.length === 0) return;
 
-    props.onSend({ message: message.trim(), attachments });
+    props.onSend({ message: message.trim(), attachments, extractedDocuments });
     setMessage("");
     setAttachments([]);
+    setExtractedDocuments([]);
     setError(null);
   }
 
