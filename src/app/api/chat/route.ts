@@ -75,6 +75,12 @@ const ChatRequestBodySchema = z.object({
 
 type ChatRequestBody = z.infer<typeof ChatRequestBodySchema>;
 
+type HistoryItem = {
+  role: string;
+  content_original_md: string;
+  sequence: number;
+};
+
 function toOpenAIInputFromAttachment(a: BotCatAttachment) {
   const url = a.blobUrlOriginal ?? a.originalUrl;
   if (!url) return null;
@@ -322,7 +328,7 @@ export async function POST(request: Request) {
     },
   });
 
-  const historyAsc = history.slice().reverse();
+  const historyAsc = (history.slice().reverse() as unknown as HistoryItem[]);
 
   const textModelKind = chooseTextModelKind({
     message: body.message,
@@ -336,7 +342,7 @@ export async function POST(request: Request) {
   const inputs: any[] = [
     { type: "input_text" as const, text: BOTCAT_CHAT_PROMPT },
 
-    ...historyAsc.map((m) => ({
+    ...historyAsc.map((m: HistoryItem) => ({
       type: "input_text" as const,
       text: `${m.role}:\n${m.content_original_md}`,
     })),
