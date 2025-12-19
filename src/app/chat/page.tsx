@@ -96,6 +96,7 @@ export default function ChatPage() {
 
     const userText = data.message ?? "";
     const attachments = data.attachments ?? [];
+    const extractedDocuments = data.extractedDocuments ?? [];
 
     if (!userText.trim() && attachments.length === 0) return;
 
@@ -127,6 +128,7 @@ export default function ChatPage() {
           chatName,
           message: userText,
           attachments,
+          extractedDocuments,
           client: {
             sessionId: getOrCreateSessionId(),
             userAgent: navigator.userAgent,
