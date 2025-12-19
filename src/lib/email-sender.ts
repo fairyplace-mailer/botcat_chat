@@ -1,7 +1,20 @@
-import { Resend } from "resend";
 import type { BotCatFinalJson } from "@/lib/botcat-final-json";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+function getResend() {
+  // Import lazily to prevent build-time failures when env is not present.
+  // Next.js may evaluate modules during build/page-data collection.
+  // Runtime requests will still require RESEND_API_KEY.
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "Missing API key. Set RESEND_API_KEY to send emails via Resend."
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { Resend } = require("resend") as typeof import("resend");
+  return new Resend(apiKey);
+}
 
 function buildTranscriptLinks(chatName: string) {
   const staticBaseUrl = (process.env.STATIC_BASE_URL ?? "").replace(/\/$/, "");
@@ -35,6 +48,8 @@ export async function sendTranscriptEmail(params: {
 }) {
   const { kind, to, finalJson } = params;
 
+  const resend = getResend();
+
   const { htmlUrl, pdfUrl } = buildTranscriptLinks(finalJson.chatName);
   const brief = buildBrief(finalJson);
 
@@ -42,12 +57,12 @@ export async function sendTranscriptEmail(params: {
 
   const footerInternalLines = [
     "Email with conversation materials. Links are valid for 30 days",
-    "Sent by FairyPlace Mailer",
+    "Sent by FairyPlace\u0016\u0019 Mailer",
   ];
 
   const footerClientLines = [
     "Email with conversation materials. Links are valid for 30 days",
-    "Sent by FairyPlace Mailer",
+    "Sent by FairyPlace\u0016\u0019 Mailer",
   ];
 
   const footerLines = kind === "internal" ? footerInternalLines : footerClientLines;
