@@ -29,25 +29,29 @@ export interface MessageInputProps {
   loading?: boolean;
 }
 
-// v1.0 allowed file types (ChatGPT-like, except code):
-// - Text: txt, md, pdf, docx, rtf
-// - Data: csv, xlsx, json
-// - Images: png, jpg/jpeg, webp
-// - Archives: zip
+// Stage 1: we only allow the formats that we either:
+// - pass to the model as vision (images), or
+// - can extract text from in the browser.
+//
+// Unsupported formats (xlsx/rtf/zip/etc.) are fully disallowed.
 const ACCEPT_MIME = [
-  "text/plain",
-  "text/markdown",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
-  "application/rtf",
-  "text/csv",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
-  "application/json",
+  // images
   "image/png",
   "image/jpeg",
   "image/webp",
-  "application/zip",
+
+  // documents (client-side extraction)
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+
+  // text-like
+  "text/plain",
+  "text/markdown",
+  "application/json",
+  "text/csv",
 ] as const;
+
+type AcceptMime = (typeof ACCEPT_MIME)[number];
 
 type UploadingItem = {
   id: string;
@@ -62,6 +66,10 @@ function clamp(n: number, min: number, max: number) {
 
 function isImageMime(mime: string | null | undefined): boolean {
   return Boolean(mime && mime.startsWith("image/"));
+}
+
+function isAllowedMime(mime: string | null | undefined): mime is AcceptMime {
+  return Boolean(mime && (ACCEPT_MIME as readonly string[]).includes(mime));
 }
 
 async function extractDocumentText(file: File): Promise<string | null> {
@@ -90,7 +98,6 @@ async function extractDocumentText(file: File): Promise<string | null> {
     return extractDocxText(file, limits);
   }
 
-  // RTF/XLSX/ZIP: not supported in Stage 1 (would require heavier processing)
   return null;
 }
 
@@ -157,8 +164,8 @@ export function MessageInput(props: MessageInputProps) {
     setError(null);
 
     for (const file of files) {
-      if (!file.type || !ACCEPT_MIME.includes(file.type as any)) {
-        setError(`File type not allowed: ${file.name} (${file.type || "unknown"})`);
+      // Full disallow: do not upload, do not attach, do not extract.
+      if (!isAllowedMime(file.type)) {
         continue;
       }
 
@@ -221,7 +228,7 @@ export function MessageInput(props: MessageInputProps) {
           } catch {
             // Extraction failure should not block sending.
             setError(
-              `Text extraction failed for: ${file.name}. You can still send the file, but the model will not read it.`,
+              `Text extraction failed for: ${file.name}. Please try another file.`,
             );
           }
         }
