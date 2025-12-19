@@ -117,6 +117,16 @@ function formatExtractedDocuments(docs: ExtractedDocument[]): string {
     .join("\n\n");
 }
 
+function toExtractedDocumentsMeta(docs: ExtractedDocument[]) {
+  return docs.map((d) => ({
+    attachmentId: d.attachmentId,
+    fileName: d.fileName,
+    mimeType: d.mimeType,
+    textChars: d.text.length,
+    trimmed: d.text.includes("[TRIMMED]"),
+  }));
+}
+
 function sseHeaders() {
   return {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -202,6 +212,8 @@ export async function POST(request: Request) {
   const ttlDaysMs = 30 * 24 * 60 * 60 * 1000;
   const expiresAt = new Date(now.getTime() + ttlDaysMs);
 
+  const extractedTextBlock = formatExtractedDocuments(body.extractedDocuments ?? []);
+
   // Upsert conversation and atomically compute sequences.
   // NOTE: prisma client in this repo is intentionally typed as `any` (see src/lib/prisma.ts)
   // so we keep transaction typing compatible with that.
@@ -256,6 +268,9 @@ export async function POST(request: Request) {
           is_voice: false,
           created_at: now,
           sequence: userSeq,
+          meta: {
+            extractedDocuments: toExtractedDocumentsMeta(body.extractedDocuments ?? []),
+          },
         },
       });
 
@@ -305,7 +320,6 @@ export async function POST(request: Request) {
 
   // Create embedding for the user message (Stage 1 requirement).
   // We include extracted docs in the embedding input so future search works better.
-  const extractedTextBlock = formatExtractedDocuments(body.extractedDocuments ?? []);
   const embeddingText = extractedTextBlock
     ? `${body.message}\n\n${extractedTextBlock}`
     : body.message;
@@ -375,6 +389,13 @@ export async function POST(request: Request) {
             userMessageId,
             userSequence,
             usedHistoryCount: historyAsc.length,
+            extractedDocuments: (body.extractedDocuments ?? []).map((d) => ({
+              attachmentId: d.attachmentId,
+              fileName: d.fileName,
+              mimeType: d.mimeType,
+              textChars: d.text.length,
+              trimmed: d.text.includes("[TRIMMED]"),
+            })),
           })
         )
       );
