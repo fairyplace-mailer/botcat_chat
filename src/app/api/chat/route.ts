@@ -196,9 +196,11 @@ export async function POST(request: Request) {
   const ttlDaysMs = 30 * 24 * 60 * 60 * 1000;
   const expiresAt = new Date(now.getTime() + ttlDaysMs);
 
-  type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
-
   // Upsert conversation and atomically compute sequences.
+  // NOTE: prisma client in this repo is intentionally typed as `any` (see src/lib/prisma.ts)
+  // so we keep transaction typing compatible with that.
+  type TxClient = typeof prisma;
+
   const { conversationId, userMessageId, botMessageId, userSequence, botSequence } =
     await prisma.$transaction(async (tx: TxClient) => {
       const conv = await tx.conversation.upsert({
