@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
+import crypto from "node:crypto";
 import { BOTCAT_CHAT_PROMPT } from "@/lib/botcat-chat-prompt";
 import { prisma } from "@/lib/prisma";
 import { generateChatName, generateMessageId } from "@/lib/chat-ids";
@@ -11,6 +12,10 @@ type ChatRequestBody = {
   chatName?: string | null;
   message?: string;
   attachments?: BotCatAttachment[];
+  client?: {
+    sessionId?: string;
+    userAgent?: string;
+  };
 };
 
 function sse(data: unknown, event?: string) {
@@ -48,6 +53,22 @@ function toOpenAIInputFromAttachments(attachments: BotCatAttachment[]) {
   return parts;
 }
 
+function extractIp(req: NextRequest): string {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const xRealIp = req.headers.get("x-real-ip");
+  if (xRealIp) return xRealIp.trim();
+  return "";
+}
+
+function hashIp(ip: string): string {
+  if (!ip) return "";
+  return crypto.createHash("sha256").update(ip).digest("hex").slice(0, 32);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => null)) as ChatRequestBody | null;
@@ -75,10 +96,14 @@ export async function POST(req: NextRequest) {
       if (parsed.success) parsedAttachments.push(parsed.data);
     }
 
+    const clientSessionId = body.client?.sessionId?.trim() || null;
+    const clientUserAgent = body.client?.userAgent?.trim() || null;
+    const ipHash = hashIp(extractIp(req)) || null;
+
     const now = new Date();
     let chatName = rawChatName ?? null;
 
-    // 0. 
+    // 0.
     // NOTE: translation/detection will be removed from /api/chat in a later step;
     // we keep current behavior for now.
     const userTranslation = await detectAndTranslate(message);
@@ -114,7 +139,25 @@ export async function POST(req: NextRequest) {
           started_at: now,
           last_activity_at: now,
           message_count: 0,
+          meta: {
+            clientSessionId,
+            userAgent: clientUserAgent,
+            ipHash,
+          },
         },
+      });
+    } else if (clientSessionId || clientUserAgent || ipHash) {
+      // Persist client metadata on existing conversation if we have new values.
+      const nextMeta = {
+        ...(typeof conversation.meta === "object" && conversation.meta ? conversation.meta : {}),
+        ...(clientSessionId ? { clientSessionId } : {}),
+        ...(clientUserAgent ? { userAgent: clientUserAgent } : {}),
+        ...(ipHash ? { ipHash } : {}),
+      };
+
+      conversation = await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { meta: nextMeta },
       });
     }
 
