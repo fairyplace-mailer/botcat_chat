@@ -9,21 +9,28 @@ export const openai = new OpenAI({
   apiKey: env.OPENAI_API_KEY,
 });
 
-export type BotCatModelKind = "chat" | "reasoning" | "finalize";
+export type BotCatTextModelKind = "chat" | "chat_strong" | "reasoning";
 
 /**
- * Выбор модели по типу задачи (Dynamic Model Selection).
- * Логика согласована с ТЗ: gpt-4.1-mini — основной, o3-mini — reasoning.
+ *  Dynamic Model Selection (text).
+ * Source of truth: src/lib/env.ts
  */
-export function selectBotCatModel(kind: BotCatModelKind): string {
+export function selectBotCatTextModel(kind: BotCatTextModelKind): string {
   switch (kind) {
+    case "chat_strong":
+      return env.OPENAI_MODEL_CHAT_STRONG;
     case "reasoning":
-      return env.OPENAI_MODEL_REASONING || "o3-mini";
-    case "finalize":
-      // Для финального JSON всегда gpt-4.1-mini
-      return "gpt-4.1-mini";
+      return env.OPENAI_MODEL_REASONING;
     case "chat":
     default:
-      return env.OPENAI_MODEL_CHAT || "gpt-4.1-mini";
+      return env.OPENAI_MODEL_CHAT;
   }
+}
+
+export function selectBotCatEmbeddingModel(): string {
+  return env.OPENAI_MODEL_EMBEDDING;
+}
+
+export function selectBotCatImageModel(quality: "standard" | "high" = "standard"): string {
+  return quality === "high" ? env.OPENAI_MODEL_IMAGE_HIGH : env.OPENAI_MODEL_IMAGE;
 }
