@@ -180,6 +180,38 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // 2a. Persist attachments
+    if (parsedAttachments.length > 0) {
+      const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      await prisma.attachment.createMany({
+        data: parsedAttachments.map((a) => {
+          const blobUrlOriginal = a.blobUrlOriginal ?? null;
+          const externalUrl = a.originalUrl ?? null;
+
+          const kind = blobUrlOriginal
+            ? "user_upload"
+            : externalUrl
+              ? "external_url"
+              : "external_url";
+
+          return {
+            conversation_id: conversation!.id,
+            message_id: userMessageId,
+            kind,
+            file_name: a.fileName ?? null,
+            mime_type: a.mimeType ?? null,
+            file_size_bytes: a.fileSizeBytes ?? null,
+            blob_key_original: a.blobKeyOriginal ?? null,
+            blob_url_original: blobUrlOriginal,
+            blob_url_preview: a.blobUrlPreview ?? null,
+            external_url: externalUrl,
+            expires_at: expiresAt,
+          };
+        }),
+      });
+    }
+
     conversation = await prisma.conversation.update({
       where: { id: conversation.id },
       data: {
