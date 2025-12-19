@@ -10,7 +10,12 @@ import { BOTCAT_CHAT_PROMPT } from "@/lib/botcat-chat-prompt";
 
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
 import { generateChatName, generateMessageId } from "@/lib/chat-ids";
-import { openai, selectBotCatEmbeddingModel, selectBotCatTextModel, type BotCatTextModelKind } from "@/lib/openai";
+import {
+  openai,
+  selectBotCatEmbeddingModel,
+  selectBotCatTextModel,
+  type BotCatTextModelKind,
+} from "@/lib/openai";
 import { mapBotCatAttachmentsArrayToDb } from "@/server/attachments/blob-mapper";
 
 function sha256HexShort(input: string): string {
@@ -130,7 +135,13 @@ function chooseTextModelKind(params: {
   const hasImages = attachments.some((a) => (a.mimeType ?? "").startsWith("image/"));
 
   const lower = message.toLowerCase();
-  const reasoningHints = ["step by step", "reasoning", "prove", "3e313e413d4339", "3f3e4830333e323e"];
+  const reasoningHints = [
+    "step by step",
+    "reasoning",
+    "prove",
+    "обоснуй",
+    "пошагово",
+  ];
 
   if (len > 2000 || reasoningHints.some((k) => lower.includes(k))) return "reasoning";
 
@@ -186,100 +197,101 @@ export async function POST(request: Request) {
   const expiresAt = new Date(now.getTime() + ttlDaysMs);
 
   // Upsert conversation and atomically compute sequences.
-  const { conversationId, userMessageId, botMessageId, userSequence, botSequence } = await prisma.$transaction(async (tx) => {
-    const conv = await tx.conversation.upsert({
-      where: { chat_name: chatName },
-      create: {
-        chat_name: chatName,
-        user_id: null,
-        status: "active",
-        language_original: "und",
-        started_at: now,
-        last_activity_at: now,
-        meta: {
-          clientSessionId: body.client?.sessionId ?? null,
-          userAgent: body.client?.userAgent ?? null,
-          ipHash,
+  const { conversationId, userMessageId, botMessageId, userSequence, botSequence } =
+    await prisma.$transaction(async (tx: Parameters<typeof prisma.$transaction>[0] extends (arg: infer A) => any ? A : never) => {
+      const conv = await tx.conversation.upsert({
+        where: { chat_name: chatName },
+        create: {
+          chat_name: chatName,
+          user_id: null,
+          status: "active",
+          language_original: "und",
+          started_at: now,
+          last_activity_at: now,
+          meta: {
+            clientSessionId: body.client?.sessionId ?? null,
+            userAgent: body.client?.userAgent ?? null,
+            ipHash,
+          },
         },
-      },
-      update: {
-        last_activity_at: now,
-        meta: {
-          clientSessionId: body.client?.sessionId ?? null,
-          userAgent: body.client?.userAgent ?? null,
-          ipHash,
+        update: {
+          last_activity_at: now,
+          meta: {
+            clientSessionId: body.client?.sessionId ?? null,
+            userAgent: body.client?.userAgent ?? null,
+            ipHash,
+          },
         },
-      },
-      select: {
-        id: true,
-        message_count: true,
-      },
-    });
-
-    const userSeq = conv.message_count + 1;
-    const botSeq = conv.message_count + 2;
-
-    const uMid = generateMessageId(chatName, "u", userSeq);
-    const bMid = generateMessageId(chatName, "b", botSeq);
-
-    await tx.message.create({
-      data: {
-        conversation_id: conv.id,
-        message_id: uMid,
-        role: "User",
-        content_original_md: body.message,
-        content_translated_md: null,
-        has_attachments: body.attachments.length > 0,
-        has_links: false,
-        is_voice: false,
-        created_at: now,
-        sequence: userSeq,
-      },
-    });
-
-    const attachmentRows = mapBotCatAttachmentsArrayToDb({
-      attachments: (body.attachments ?? []).map((a) => ({
-        attachmentId: a.attachmentId,
-        messageId: uMid,
-        kind: a.kind,
-        fileName: a.fileName ?? null,
-        mimeType: a.mimeType ?? null,
-        fileSizeBytes: a.fileSizeBytes ?? null,
-        pageCount: a.pageCount ?? null,
-        originalUrl: a.originalUrl ?? null,
-        blobUrlOriginal: a.blobUrlOriginal ?? null,
-        blobUrlPreview: a.blobUrlPreview ?? null,
-      })),
-      conversationId: conv.id,
-      now,
-    });
-
-    if (attachmentRows.length > 0) {
-      // Ensure expires_at is correct (mapper already sets it), but we keep spec TTL in sync here.
-      await tx.attachment.createMany({
-        data: attachmentRows.map((r) => ({
-          ...r,
-          expires_at: expiresAt,
-        })),
+        select: {
+          id: true,
+          message_count: true,
+        },
       });
-    }
 
-    await tx.conversation.update({
-      where: { id: conv.id },
-      data: {
-        message_count: { increment: 2 },
-        last_activity_at: now,
-      },
+      const userSeq = conv.message_count + 1;
+      const botSeq = conv.message_count + 2;
+
+      const uMid = generateMessageId(chatName, "u", userSeq);
+      const bMid = generateMessageId(chatName, "b", botSeq);
+
+      await tx.message.create({
+        data: {
+          conversation_id: conv.id,
+          message_id: uMid,
+          role: "User",
+          content_original_md: body.message,
+          content_translated_md: null,
+          has_attachments: body.attachments.length > 0,
+          has_links: false,
+          is_voice: false,
+          created_at: now,
+          sequence: userSeq,
+        },
+      });
+
+      const attachmentRows = mapBotCatAttachmentsArrayToDb({
+        attachments: (body.attachments ?? []).map((a) => ({
+          attachmentId: a.attachmentId,
+          messageId: uMid,
+          kind: a.kind,
+          fileName: a.fileName ?? null,
+          mimeType: a.mimeType ?? null,
+          fileSizeBytes: a.fileSizeBytes ?? null,
+          pageCount: a.pageCount ?? null,
+          originalUrl: a.originalUrl ?? null,
+          blobUrlOriginal: a.blobUrlOriginal ?? null,
+          blobUrlPreview: a.blobUrlPreview ?? null,
+        })),
+        conversationId: conv.id,
+        now,
+      });
+
+      if (attachmentRows.length > 0) {
+        // Ensure expires_at is correct (mapper already sets it), but we keep spec TTL in sync here.
+        await tx.attachment.createMany({
+          data: attachmentRows.map((r) => ({
+            ...r,
+            expires_at: expiresAt,
+          })),
+        });
+      }
+
+      await tx.conversation.update({
+        where: { id: conv.id },
+        data: {
+          message_count: { increment: 2 },
+          last_activity_at: now,
+        },
+      });
+
+      return {
+        conversationId: conv.id,
+        userMessageId: uMid,
+        botMessageId: bMid,
+        userSequence: userSeq,
+        botSequence: botSeq,
+      };
     });
-
-    return {
-      conversationId: conv.id,
-      userMessageId: uMid,
-      botMessageId: bMid,
-      userSequence: userSeq,
-      botSequence: botSeq,
-    };
-  });
 
   // Create embedding for the user message (Stage 1 requirement).
   // We include extracted docs in the embedding input so future search works better.
