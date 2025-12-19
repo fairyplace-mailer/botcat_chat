@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
-import { BOTCAT_SYSTEM_PROMPT } from "@/lib/botcat-system";
+import { BOTCAT_CHAT_PROMPT } from "@/lib/botcat-chat-prompt";
 import { prisma } from "@/lib/prisma";
 import { generateChatName, generateMessageId } from "@/lib/chat-ids";
 import { detectAndTranslate } from "@/lib/translator";
@@ -78,7 +78,9 @@ export async function POST(req: NextRequest) {
     const now = new Date();
     let chatName = rawChatName ?? null;
 
-    // 0. Автоопределение языка + перевод сообщения пользователя на RU
+    // 0. 
+    // NOTE: translation/detection will be removed from /api/chat in a later step;
+    // we keep current behavior for now.
     const userTranslation = await detectAndTranslate(message);
     const languageOriginal =
       userTranslation.language_original && userTranslation.language_original.trim()
@@ -89,7 +91,7 @@ export async function POST(req: NextRequest) {
     const userHasLinks = detectHasLinks(message);
     const userIsVoice = detectIsVoice(message);
 
-    // 1. Находим или создаём Conversation
+    // 1. Find or create Conversation
     let conversation = null as Awaited<
       ReturnType<typeof prisma.conversation.findUnique>
     > | null;
@@ -116,7 +118,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Сохраняем сообщение пользователя
+    // 2. Save user message
     const userSequence = conversation.message_count + 1;
     const userMessageId = generateMessageId(chatName!, "u", userSequence);
 
@@ -158,7 +160,7 @@ export async function POST(req: NextRequest) {
           content: [
             {
               type: "input_text",
-              text: BOTCAT_SYSTEM_PROMPT,
+              text: BOTCAT_CHAT_PROMPT,
             },
           ],
         },
@@ -211,14 +213,14 @@ export async function POST(req: NextRequest) {
 
             await stream.done();
 
-            // 3.1. Перевод ответа BotCat на RU
+            // Translation will be removed from /api/chat in a later step.
             const botTranslation = await detectAndTranslate(fullReply);
             const botTranslatedMd = botTranslation.translated_md ?? "";
 
             const botHasLinks = detectHasLinks(fullReply);
             const botIsVoice = detectIsVoice(fullReply);
 
-            // 4. Сохраняем ответ BotCat
+            // 4. Save BotCat response
             const botSequence = conversation!.message_count + 1;
             const botMessageId = generateMessageId(chatName!, "b", botSequence);
 
