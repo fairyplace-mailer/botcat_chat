@@ -139,8 +139,8 @@ function chooseTextModelKind(params: {
     "step by step",
     "reasoning",
     "prove",
-    "обоснуй",
-    "пошагово",
+    "\u043e\u0431\u043e\u0441\u043d\u0443\u0439",
+    "\u043f\u043e\u0448\u0430\u0433\u043e\u0432\u043e",
   ];
 
   if (len > 2000 || reasoningHints.some((k) => lower.includes(k))) return "reasoning";
@@ -196,9 +196,11 @@ export async function POST(request: Request) {
   const ttlDaysMs = 30 * 24 * 60 * 60 * 1000;
   const expiresAt = new Date(now.getTime() + ttlDaysMs);
 
+  type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
   // Upsert conversation and atomically compute sequences.
   const { conversationId, userMessageId, botMessageId, userSequence, botSequence } =
-    await prisma.$transaction(async (tx: Parameters<typeof prisma.$transaction>[0] extends (arg: infer A) => any ? A : never) => {
+    await prisma.$transaction(async (tx: TxClient) => {
       const conv = await tx.conversation.upsert({
         where: { chat_name: chatName },
         create: {
