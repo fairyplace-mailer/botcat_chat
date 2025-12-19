@@ -8,9 +8,15 @@
 
 This repository contains BotCat Consultant  a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
 
-### 0.1 Stages
+### 0.1 Product versions
 
-**Stage 1  Web chat (v1.0): https://fairyplace.net/chat**
+**BotCat v1.0** corresponds to **Stage 1** + **Stage 2**.
+
+**BotCat v2.0** corresponds to **Stage 3** (Web chat PRO).
+
+### 0.2 Stages
+
+**Stage 1  Web chat (BotCat v1.0): https://fairyplace.net/chat**
 
 - One chat.
 - Chat history is stored **only in UI memory** (lost on page reload).
@@ -18,14 +24,22 @@ This repository contains BotCat Consultant  a web chat (Next.js) with a backend
 - Backend `/api/chat` responds via **SSE**.
 - PWA.
 - Attachments: user uploads go **UI  Blob directly**.
+- **Embeddings are enabled (Stage 1)**: every user message is embedded and stored in DB.
 
-**Stage 2  Social integrations** (bots in FairyPlace2 social channels).
+**Stage 2  Social integrations (BotCat v1.0)**
 
-**Stage 3  Web chat PRO (v2.0): https://fairyplace.net/chat_pro**
+Bots in FairyPlace2 social channels.
 
+**Stage 3  Web chat PRO (BotCat v2.0): https://fairyplace.net/chat_pro**
+
+Stage 3 (v2.0) differs from Stage 1 (v1.0) by:
+- usage of OpenAI models of the latest generation (exact list to be defined before Stage 3);
+- mandatory user registration/auth;
+- ability for the user to download PDF files of previous dialogs.
+
+Also for Stage 3 UI:
 - One chat.
 - Chat history is stored **only in UI memory** (lost on page reload).
-- Requires registration/auth (details before Stage 3 implementation).
 - UI includes a sidebar/tab like ChatGPT:
   - logo
   - New Chat
@@ -54,14 +68,42 @@ When conversation ends (user left or 1h+ inactive), orchestrator triggers finali
 
 ---
 
-## 3. Attachments & previews
+## 3. Attachments, LLM inputs & previews
 
-### 3.1 User uploads
+### 3.1 User uploads (storage)
 
 - UI uploads files directly to Vercel Blob via `/api/blob/upload`.
 - Backend receives only Blob URLs in `/api/chat` and stores them.
 
-### 3.2 Previews (MANDATORY)
+Blob URLs are used for:
+- UI display/download
+- transcript artifacts generation during finalization (server fetch of Blob URLs)
+
+### 3.2 LLM input rules (IMPORTANT)
+
+**Blob = storage, not an LLM input source.**
+
+We assume:
+- OpenAI does **not** read Vercel Blob URLs for arbitrary documents.
+- Vercel Hobby limits do not allow heavy server-side document parsing.
+
+Therefore:
+
+- **Images (png/jpg/webp)**: may be passed to OpenAI as vision input (`input_image`) using their Blob URL.
+- **PDF/DOCX/XLSX/CSV/JSON/TXT/MD/ZIP**: must NOT be passed to OpenAI as `file_url`.
+  - If the user attaches such a file, the UI extracts a limited text representation in the browser (see 3.3) and sends it to `/api/chat` as text.
+
+### 3.3 Client-side extraction for documents
+
+For PDF/DOCX and other non-image attachments, Stage 1 uses **client-side extraction**:
+- PDF  `pdf.js`
+- DOCX  `mammoth`
+
+The UI sends extracted text to `/api/chat` as `extractedDocuments[]`.
+
+The UI must limit extracted text volume (pages/blocks/characters) to control latency and token usage.
+
+### 3.4 Previews (MANDATORY)
 
 For images included into transcripts (HTML/PDF/email):
 - preview width: **600px**
@@ -76,8 +118,10 @@ Previews are generated on server during finalization (webhook), based on **Blob 
 
 ### 4.1 POST `/api/chat` (SSE)
 
-- Request JSON includes `chatName | null`, `message`, optional `attachments[]`, and client metadata.
+- Request JSON includes `chatName | null`, `message`, optional `attachments[]`, optional `extractedDocuments[]`, and client metadata.
 - Response is `text/event-stream` with incremental deltas and a final event.
+
+The backend may use DB history for model context.
 
 ---
 
