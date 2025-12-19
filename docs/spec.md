@@ -1,4 +1,4 @@
-# BOTCAT2 CONSULTANT
+# BOTCAT™ CONSULTANT
 
 **Version:** 1.0 (Stage 1: web chat v1.0)
 
@@ -6,7 +6,7 @@
 
 ## 0. Context and scope
 
-This repository contains BotCat Consultant  a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
+This repository contains BotCat Consultant – a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
 
 ### 0.1 Product versions
 
@@ -16,21 +16,21 @@ This repository contains BotCat Consultant  a web chat (Next.js) with a backend
 
 ### 0.2 Stages
 
-**Stage 1  Web chat (BotCat v1.0): https://fairyplace.net/chat**
+**Stage 1 – Web chat (BotCat v1.0): https://fairyplace.net/chat**
 
 - One chat.
 - Chat history is stored **only in UI memory** (lost on page reload).
 - Button **New Chat** resets the current chat without reloading the page.
 - Backend `/api/chat` responds via **SSE**.
 - PWA.
-- Attachments: user uploads go **UI  Blob directly**.
+- Attachments: user uploads go **UI → Blob directly**.
 - **Embeddings are enabled (Stage 1)**: every user message is embedded and stored in DB.
 
-**Stage 2  Social integrations (BotCat v1.0)**
+**Stage 2 – Social integrations (BotCat v1.0)**
 
-Bots in FairyPlace2 social channels.
+Bots in FairyPlace™ social channels.
 
-**Stage 3  Web chat PRO (BotCat v2.0): https://fairyplace.net/chat_pro**
+**Stage 3 – Web chat PRO (BotCat v2.0): https://fairyplace.net/chat_pro**
 
 Stage 3 (v2.0) differs from Stage 1 (v1.0) by:
 - usage of OpenAI models of the latest generation (exact list to be defined before Stage 3);
@@ -40,7 +40,7 @@ Stage 3 (v2.0) differs from Stage 1 (v1.0) by:
 Also for Stage 3 UI:
 - One chat.
 - Chat history is stored **only in UI memory** (lost on page reload).
-- UI includes a sidebar/tab like ChatGPT:
+- UI includes a “sidebar/tab” like ChatGPT:
   - logo
   - New Chat
   - links/buttons to download previous PDFs
@@ -50,9 +50,9 @@ Also for Stage 3 UI:
 
 ## 1. Website routes (public)
 
-- `https://fairyplace.net`  **main landing page** (logo, English info, buttons/links). *(Implementation later)*
-- `https://fairyplace.net/chat`  BotCat Consultant v1.0 UI.
-- `https://fairyplace.net/chat_pro`  BotCat Consultant v2.0 UI. *(Implementation later)*
+- `https://fairyplace.net` – **main landing page** (logo, English info, buttons/links). *(Implementation later)*
+- `https://fairyplace.net/chat` – BotCat Consultant v1.0 UI.
+- `https://fairyplace.net/chat_pro` – BotCat Consultant v2.0 UI. *(Implementation later)*
 
 Static domain:
 - `STATIC_BASE_URL = https://static.fairyplace.net`
@@ -96,18 +96,26 @@ Therefore:
 ### 3.3 Client-side extraction for documents
 
 For PDF/DOCX and other non-image attachments, Stage 1 uses **client-side extraction**:
-- PDF  `pdf.js`
-- DOCX  `mammoth`
+- PDF – `pdf.js`
+- DOCX – `mammoth`
 
 The UI sends extracted text to `/api/chat` as `extractedDocuments[]`.
 
-The UI must limit extracted text volume (pages/blocks/characters) to control latency and token usage.
+#### 3.3.1 Extraction limits (Stage 1)
+
+To avoid latency and token blow-ups, the UI MUST limit extracted text volume.
+
+**Stage 1 defaults (v1.0):**
+- `maxPdfPages`: **8**
+- `maxChars`: **20_000** (after normalization)
+
+If extracted content is trimmed, UI must indicate that it was trimmed (e.g. `[TRIMMED]`).
 
 ### 3.4 Previews (MANDATORY)
 
 For images included into transcripts (HTML/PDF/email):
 - preview width: **600px**
-- target size: ** 80KB**
+- target size: **≈ 80KB**
 - preview format: **webp** (fallback to jpeg when needed)
 
 Previews are generated on server during finalization (webhook), based on **Blob original URL**.
@@ -125,14 +133,14 @@ The backend may use DB history for model context.
 
 ---
 
-## 5. Transcript artifacts (HTML/PDF)  internal vs original
+## 5. Transcript artifacts (HTML/PDF) – internal vs original
 
 ### 5.1 Artifact types
 
 The system supports **two transcript views**:
 
-- **Internal (RU translated)**  used for internal team workflows and internal email.
-- **Original**  in the original conversation language (no translation).
+- **Internal (RU translated)** – used for internal team workflows and internal email.
+- **Original** – in the original conversation language (no translation).
 
 For each chat we support 4 artifacts:
 
@@ -148,13 +156,13 @@ For each chat we support 4 artifacts:
 
 ### 5.3 Stage enablement
 
-**Stage 1 (v1.0)  enabled:**
+**Stage 1 (v1.0) – enabled:**
 - Send **1 internal email** to `fairyplace.tm@gmail.com`.
 - Provide links to:
   - **1 HTML (internal RU)**
   - **1 PDF (internal RU)**
 
-**Stage 2/3 (v2.0)  enabled:**
+**Stage 2/3 (v2.0) – enabled:**
 - Send **1 internal email** to `fairyplace.tm@gmail.com` with links to:
   - **HTML_internal_ru** (in email)
   - **PDF_internal_ru** (in email)
@@ -195,7 +203,7 @@ Cleanup runs automatically via Vercel Cron (hourly trigger, daily execution at l
 
 ---
 
-## 7. Internal email (FairyPlace2)
+## 7. Internal email (FairyPlace™)
 
 Internal email must include:
 - header image: `https://static.fairyplace.net/header.v3.png`
@@ -205,8 +213,8 @@ Internal email must include:
 - link to internal HTML transcript
 - link to internal PDF transcript
 - footer:
-  - Email with conversation materials. Links are valid for 30 days
-  - Sent by FairyPlace2 Mailer
+  - “Email with conversation materials. Links are valid for 30 days”
+  - “Sent by FairyPlace™ Mailer”
 
 ---
 
