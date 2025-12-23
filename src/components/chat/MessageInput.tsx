@@ -1,12 +1,26 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { BotCatAttachment } from "@/lib/botcat-attachment";
+import {
+  DEFAULT_EXTRACTION_LIMITS,
+  extractDocxText,
+  extractPdfText,
+  extractTextFromTextLikeFile,
+} from "./document-extractors";
 
 export type { BotCatAttachment };
+
+export type ExtractedDocument = {
+  attachmentId: string;
+  fileName: string | null;
+  mimeType: string | null;
+  text: string;
+};
 
 export type MessageInputData = {
   message: string;
   attachments?: BotCatAttachment[];
+  extractedDocuments?: ExtractedDocument[];
 };
 
 export interface MessageInputProps {
@@ -15,25 +29,29 @@ export interface MessageInputProps {
   loading?: boolean;
 }
 
-// v1.0 allowed file types (ChatGPT-like, except code):
-// - Text: txt, md, pdf, docx, rtf
-// - Data: csv, xlsx, json
-// - Images: png, jpg/jpeg, webp
-// - Archives: zip
+// Stage 1: we only allow the formats that we either:
+// - pass to the model as vision (images), or
+// - can extract text from in the browser.
+//
+// Unsupported formats (xlsx/rtf/zip/etc.) are fully disallowed.
 const ACCEPT_MIME = [
-  "text/plain",
-  "text/markdown",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
-  "application/rtf",
-  "text/csv",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
-  "application/json",
+  // images
   "image/png",
   "image/jpeg",
   "image/webp",
-  "application/zip",
+
+  // documents (client-side extraction)
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+
+  // text-like
+  "text/plain",
+  "text/markdown",
+  "application/json",
+  "text/csv",
 ] as const;
+
+type AcceptMime = (typeof ACCEPT_MIME)[number];
 
 type UploadingItem = {
   id: string;
@@ -46,9 +64,51 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+function isImageMime(mime: string | null | undefined): boolean {
+  return Boolean(mime && mime.startsWith("image/"));
+}
+
+function isAllowedMime(mime: string | null | undefined): mime is AcceptMime {
+  return Boolean(mime && (ACCEPT_MIME as readonly string[]).includes(mime));
+}
+
+function wasTrimmed(text: string): boolean {
+  return text.includes("[TRIMMED]");
+}
+
+async function extractDocumentText(file: File): Promise<string | null> {
+  const limits = DEFAULT_EXTRACTION_LIMITS;
+
+  // plain text formats
+  if (
+    file.type === "text/plain" ||
+    file.type === "text/markdown" ||
+    file.type === "application/json" ||
+    file.type === "text/csv"
+  ) {
+    return extractTextFromTextLikeFile(file, limits);
+  }
+
+  // PDF
+  if (file.type === "application/pdf") {
+    return extractPdfText(file, limits);
+  }
+
+  // DOCX
+  if (
+    file.type ===
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    return extractDocxText(file, limits);
+  }
+
+  return null;
+}
+
 export function MessageInput(props: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<BotCatAttachment[]>([]);
+  const [extractedDocuments, setExtractedDocuments] = useState<ExtractedDocument[]>([]);
   const [uploading, setUploading] = useState<UploadingItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,8 +168,8 @@ export function MessageInput(props: MessageInputProps) {
     setError(null);
 
     for (const file of files) {
-      if (!file.type || !ACCEPT_MIME.includes(file.type as any)) {
-        setError(`File type not allowed: ${file.name} (${file.type || "unknown"})`);
+      // Full disallow: do not upload, do not attach, do not extract.
+      if (!isAllowedMime(file.type)) {
         continue;
       }
 
@@ -118,6 +178,8 @@ export function MessageInput(props: MessageInputProps) {
         ...prev,
         { id: uploadId, name: file.name, type: file.type, progress: 0 },
       ]);
+
+      const attachmentId = crypto.randomUUID();
 
       try {
         const blob = await upload(file.name, file, {
@@ -138,7 +200,7 @@ export function MessageInput(props: MessageInputProps) {
         setAttachments((prev) => [
           ...prev,
           {
-            attachmentId: crypto.randomUUID(),
+            attachmentId,
             // messageId assigned server-side; UI keeps a placeholder.
             messageId: "ui-memory",
             kind: "user_upload",
@@ -151,6 +213,29 @@ export function MessageInput(props: MessageInputProps) {
             blobUrlPreview: null,
           },
         ]);
+
+        // Extract text for non-image files (Stage 1 requirement).
+        if (!isImageMime(file.type)) {
+          try {
+            const text = await extractDocumentText(file);
+            if (text) {
+              setExtractedDocuments((prev) => [
+                ...prev,
+                {
+                  attachmentId,
+                  fileName: file.name || null,
+                  mimeType: file.type || null,
+                  text,
+                },
+              ]);
+            }
+          } catch {
+            // Extraction failure should not block sending.
+            setError(
+              `Text extraction failed for: ${file.name}. Please try another file.`,
+            );
+          }
+        }
       } catch {
         setError(`Upload failed: ${file.name}`);
       } finally {
@@ -175,18 +260,38 @@ export function MessageInput(props: MessageInputProps) {
   }
 
   function removeAttachment(idx: number) {
+    const att = attachments[idx];
     setAttachments((a) => a.filter((_, i) => i !== idx));
+    if (att) {
+      setExtractedDocuments((docs) =>
+        docs.filter((d) => d.attachmentId !== att.attachmentId),
+      );
+    }
   }
 
   function onSendClick() {
     if (isBusy) return;
     if (!message.trim() && attachments.length === 0) return;
 
-    props.onSend({ message: message.trim(), attachments });
+    props.onSend({ message: message.trim(), attachments, extractedDocuments });
     setMessage("");
     setAttachments([]);
+    setExtractedDocuments([]);
     setError(null);
   }
+
+  const extractedSummary = useMemo(() => {
+    if (extractedDocuments.length === 0) return null;
+
+    const docs = extractedDocuments.map((d) => {
+      const name = d.fileName ?? "document";
+      const trimmed = wasTrimmed(d.text);
+      const chars = d.text.length;
+      return `${name} — ${chars} chars${trimmed ? " (trimmed)" : ""}`;
+    });
+
+    return docs.join("; ");
+  }, [extractedDocuments]);
 
   return (
     <div className="message-input_wrapper">
@@ -222,6 +327,12 @@ export function MessageInput(props: MessageInputProps) {
               Uploading {u.name} {Math.round(u.progress)}%
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {extractedSummary ? (
+        <div className="message-input_uploading">
+          Extracted: {extractedSummary}
         </div>
       ) : null}
 

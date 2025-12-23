@@ -1,297 +1,454 @@
-import { NextRequest } from "next/server";
-import OpenAI from "openai";
-import { BOTCAT_SYSTEM_PROMPT } from "@/lib/botcat-system";
-import { prisma } from "@/lib/prisma";
-import { generateChatName, generateMessageId } from "@/lib/chat-ids";
-import { detectAndTranslate } from "@/lib/translator";
-import { detectHasLinks, detectIsVoice } from "@/lib/message-flags";
-import { BotCatAttachmentSchema, type BotCatAttachment } from "@/lib/botcat-attachment";
+import { NextResponse } from "next/server";
 
-type ChatRequestBody = {
-  chatName?: string | null;
-  message?: string;
-  attachments?: BotCatAttachment[];
+import crypto from "crypto";
+
+import { z } from "zod";
+
+import { prisma } from "@/server/db";
+
+import { BOTCAT_CHAT_PROMPT } from "@/lib/botcat-chat-prompt";
+
+import type { BotCatAttachment } from "@/lib/botcat-attachment";
+import { generateChatName, generateMessageId } from "@/lib/chat-ids";
+import {
+  openai,
+  selectBotCatEmbeddingModel,
+  selectBotCatTextModel,
+  type BotCatTextModelKind,
+} from "@/lib/openai";
+import { mapBotCatAttachmentsArrayToDb } from "@/server/attachments/blob-mapper";
+
+function sha256HexShort(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex").slice(0, 32);
+}
+
+function getClientIpFromHeaders(headers: Headers): string | null {
+  const xfwd = headers.get("x-forwarded-for");
+  if (xfwd) {
+    const first = xfwd.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const xreal = headers.get("x-real-ip");
+  if (xreal) return xreal.trim();
+  return null;
+}
+
+const AttachmentSchema = z.object({
+  attachmentId: z.string(),
+  messageId: z.string(),
+  kind: z.enum(["user_upload", "bot_generated", "external_url"]),
+  fileName: z.string().nullable(),
+  mimeType: z.string().nullable(),
+  fileSizeBytes: z.number().nullable(),
+  pageCount: z.number().nullable(),
+  originalUrl: z.string().url().nullable(),
+  blobUrlOriginal: z.string().url().nullable(),
+  blobUrlPreview: z.string().url().nullable(),
+});
+
+type ExtractedDocument = {
+  attachmentId: string;
+  fileName: string | null;
+  mimeType: string | null;
+  text: string;
 };
 
-function sse(data: unknown, event?: string) {
-  const lines: string[] = [];
-  if (event) lines.push(`event: ${event}`);
-  lines.push(`data: ${JSON.stringify(data)}`);
-  return lines.join("\n") + "\n\n";
-}
+const ExtractedDocumentSchema = z.object({
+  attachmentId: z.string(),
+  fileName: z.string().nullable(),
+  mimeType: z.string().nullable(),
+  text: z.string().min(1),
+});
 
-function toOpenAIInputFromAttachments(attachments: BotCatAttachment[]) {
-  // Stage v1.0: We only send what the OpenAI API can consume directly.
-  // - images as input_image
-  // - pdf/csv/text/json as input_file
-  // Anything else is ignored (still stored in our transcript later if needed).
-  const parts: Array<any> = [];
+const ChatRequestBodySchema = z.object({
+  chatName: z.string().nullable().optional(),
+  message: z.string().min(1),
+  attachments: z.array(AttachmentSchema).optional().default([]),
+  extractedDocuments: z.array(ExtractedDocumentSchema).optional().default([]),
+  client: z
+    .object({
+      sessionId: z.string().optional(),
+      userAgent: z.string().optional(),
+    })
+    .optional(),
+});
 
-  for (const a of attachments) {
-    const url = a.blobUrlOriginal ?? a.originalUrl;
-    const mime = a.mimeType ?? "";
-    if (!url) continue;
+type ChatRequestBody = z.infer<typeof ChatRequestBodySchema>;
 
-    if (mime.startsWith("image/")) {
-      parts.push({ type: "input_image", image_url: url });
-      continue;
-    }
+type HistoryItem = {
+  role: string;
+  content_original_md: string;
+  sequence: number;
+};
 
-    // OpenAI supports input_file with a URL for certain types (pdf, etc.).
-    parts.push({
-      type: "input_file",
-      filename: a.fileName ?? "attachment",
-      file_url: url,
-    });
+function toOpenAIInputFromAttachment(a: BotCatAttachment) {
+  const url = a.blobUrlOriginal ?? a.originalUrl;
+  if (!url) return null;
+
+  const mime = a.mimeType ?? "";
+  if (mime.startsWith("image/")) {
+    return {
+      type: "input_image" as const,
+      image_url: url,
+    };
   }
 
-  return parts;
+  // IMPORTANT (per docs/spec.md): non-image files are NOT passed to LLM by URL.
+  return null;
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = (await req.json().catch(() => null)) as ChatRequestBody | null;
+function formatExtractedDocuments(docs: ExtractedDocument[]): string {
+  if (!docs.length) return "";
 
-    if (!body || typeof body !== "object") {
-      return new Response(
-        JSON.stringify({ ok: false, error: "Invalid JSON body" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+  // Keep it explicit and easy to trim/debug.
+  // UI is responsible for limiting size.
+  return docs
+    .map((d, idx) => {
+      const name = d.fileName ?? `document_${idx + 1}`;
+      const mime = d.mimeType ?? "unknown";
+      return [
+        `--- EXTRACTED_DOCUMENT ${idx + 1} ---`,
+        `fileName: ${name}`,
+        `mimeType: ${mime}`,
+        "",
+        d.text,
+      ].join("\n");
+    })
+    .join("\n\n");
+}
 
-    const { chatName: rawChatName = null, message } = body;
+function toExtractedDocumentsMeta(docs: ExtractedDocument[]) {
+  return docs.map((d) => ({
+    attachmentId: d.attachmentId,
+    fileName: d.fileName,
+    mimeType: d.mimeType,
+    textChars: d.text.length,
+    trimmed: d.text.includes("[TRIMMED]"),
+  }));
+}
 
-    if (!message || typeof message !== "string") {
-      return new Response(
-        JSON.stringify({ ok: false, error: "Field 'message' is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+function sseHeaders() {
+  return {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  } as const;
+}
 
-    const attachmentsRaw = Array.isArray(body.attachments) ? body.attachments : [];
-    const parsedAttachments: BotCatAttachment[] = [];
-    for (const item of attachmentsRaw) {
-      const parsed = BotCatAttachmentSchema.safeParse(item);
-      if (parsed.success) parsedAttachments.push(parsed.data);
-    }
+function sseEvent(event: string, data: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
 
-    const now = new Date();
-    let chatName = rawChatName ?? null;
+function chooseTextModelKind(params: {
+  message: string;
+  extractedDocuments: ExtractedDocument[];
+  attachments: BotCatAttachment[];
+}): BotCatTextModelKind {
+  const { message, extractedDocuments, attachments } = params;
 
-    // 0. Автоопределение языка + перевод сообщения пользователя на RU
-    const userTranslation = await detectAndTranslate(message);
-    const languageOriginal =
-      userTranslation.language_original && userTranslation.language_original.trim()
-        ? userTranslation.language_original.trim()
-        : "und";
-    const userTranslatedMd = userTranslation.translated_md ?? "";
+  const len = message.length;
+  const hasDocsText = extractedDocuments.some((d) => d.text && d.text.length > 0);
+  const hasImages = attachments.some((a) => (a.mimeType ?? "").startsWith("image/"));
 
-    const userHasLinks = detectHasLinks(message);
-    const userIsVoice = detectIsVoice(message);
+  const lower = message.toLowerCase();
+  const reasoningHints = [
+    "step by step",
+    "reasoning",
+    "prove",
+    "\u043e\u0431\u043e\u0441\u043d\u0443\u0439",
+    "\u043f\u043e\u0448\u0430\u0433\u043e\u0432\u043e",
+  ];
 
-    // 1. Находим или создаём Conversation
-    let conversation = null as Awaited<
-      ReturnType<typeof prisma.conversation.findUnique>
-    > | null;
+  if (len > 2000 || reasoningHints.some((k) => lower.includes(k))) return "reasoning";
 
-    if (chatName) {
-      conversation = await prisma.conversation.findUnique({
+  if (len > 800 || hasDocsText || hasImages) return "chat_strong";
+
+  return "chat";
+}
+
+async function createEmbeddingForUserMessage(params: {
+  messageId: string;
+  text: string;
+}) {
+  const model = selectBotCatEmbeddingModel();
+  const res = await openai.embeddings.create({
+    model,
+    input: params.text,
+  });
+
+  const vec = res.data?.[0]?.embedding;
+  if (!vec || !Array.isArray(vec)) return;
+
+  await prisma.messageEmbedding.create({
+    data: {
+      message_id: params.messageId,
+      model,
+      vector: vec as unknown as object,
+      dims: vec.length,
+    },
+  });
+}
+
+export async function POST(request: Request) {
+  const parsed = ChatRequestBodySchema.safeParse(await request.json());
+  if (!parsed.success) {
+    return NextResponse.json(
+      { ok: false, error: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  const body: ChatRequestBody = parsed.data;
+
+  const existingChatName = body.chatName ?? null;
+  const chatName = existingChatName ?? generateChatName();
+
+  const ip = getClientIpFromHeaders(request.headers);
+  const ipHash = ip ? sha256HexShort(ip) : null;
+
+  const now = new Date();
+
+  // TTL is defined in docs/spec.md as 30 days.
+  const ttlDaysMs = 30 * 24 * 60 * 60 * 1000;
+  const expiresAt = new Date(now.getTime() + ttlDaysMs);
+
+  const extractedTextBlock = formatExtractedDocuments(body.extractedDocuments ?? []);
+
+  // Upsert conversation and atomically compute sequences.
+  // NOTE: prisma client in this repo is intentionally typed as `any` (see src/lib/prisma.ts)
+  // so we keep transaction typing compatible with that.
+  type TxClient = typeof prisma;
+
+  const { conversationId, userMessageId, botMessageId, userSequence, botSequence } =
+    await prisma.$transaction(async (tx: TxClient) => {
+      const conv = await tx.conversation.upsert({
         where: { chat_name: chatName },
-      });
-    }
-
-    if (!conversation) {
-      chatName = generateChatName(now);
-
-      conversation = await prisma.conversation.create({
-        data: {
+        create: {
           chat_name: chatName,
+          user_id: null,
           status: "active",
-          language_original: languageOriginal,
-          send_to_internal: true,
+          language_original: "und",
           started_at: now,
           last_activity_at: now,
-          message_count: 0,
+          meta: {
+            clientSessionId: body.client?.sessionId ?? null,
+            userAgent: body.client?.userAgent ?? null,
+            ipHash,
+          },
+        },
+        update: {
+          last_activity_at: now,
+          meta: {
+            clientSessionId: body.client?.sessionId ?? null,
+            userAgent: body.client?.userAgent ?? null,
+            ipHash,
+          },
+        },
+        select: {
+          id: true,
+          message_count: true,
         },
       });
-    }
 
-    // 2. Сохраняем сообщение пользователя
-    const userSequence = conversation.message_count + 1;
-    const userMessageId = generateMessageId(chatName!, "u", userSequence);
+      const userSeq = conv.message_count + 1;
+      const botSeq = conv.message_count + 2;
 
-    await prisma.message.create({
-      data: {
-        conversation_id: conversation.id,
-        message_id: userMessageId,
-        role: "User",
-        content_original_md: message,
-        content_translated_md: userTranslatedMd,
-        has_attachments: parsedAttachments.length > 0,
-        has_links: userHasLinks,
-        is_voice: userIsVoice,
-        created_at: now,
-        sequence: userSequence,
-      },
-    });
+      const uMid = generateMessageId(chatName, "u", userSeq);
+      const bMid = generateMessageId(chatName, "b", botSeq);
 
-    conversation = await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        last_activity_at: now,
-        message_count: userSequence,
-      },
-    });
-
-    // 3. SSE stream from OpenAI
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    const model = "gpt-4.1-mini";
-
-    const attachmentParts = toOpenAIInputFromAttachments(parsedAttachments);
-
-    const stream = await client.responses.stream({
-      model,
-      input: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "input_text",
-              text: BOTCAT_SYSTEM_PROMPT,
-            },
-          ],
+      await tx.message.create({
+        data: {
+          conversation_id: conv.id,
+          message_id: uMid,
+          role: "User",
+          content_original_md: body.message,
+          content_translated_md: null,
+          has_attachments: body.attachments.length > 0,
+          has_links: false,
+          is_voice: false,
+          created_at: now,
+          sequence: userSeq,
+          meta: {
+            extractedDocuments: toExtractedDocumentsMeta(body.extractedDocuments ?? []),
+          },
         },
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: message },
-            ...attachmentParts,
-          ],
+      });
+
+      const attachmentRows = mapBotCatAttachmentsArrayToDb({
+        attachments: (body.attachments ?? []).map((a) => ({
+          attachmentId: a.attachmentId,
+          messageId: uMid,
+          kind: a.kind,
+          fileName: a.fileName ?? null,
+          mimeType: a.mimeType ?? null,
+          fileSizeBytes: a.fileSizeBytes ?? null,
+          pageCount: a.pageCount ?? null,
+          originalUrl: a.originalUrl ?? null,
+          blobUrlOriginal: a.blobUrlOriginal ?? null,
+          blobUrlPreview: a.blobUrlPreview ?? null,
+        })),
+        conversationId: conv.id,
+        now,
+      });
+
+      if (attachmentRows.length > 0) {
+        // Ensure expires_at is correct (mapper already sets it), but we keep spec TTL in sync here.
+        await tx.attachment.createMany({
+          data: attachmentRows.map((r) => ({
+            ...r,
+            expires_at: expiresAt,
+          })),
+        });
+      }
+
+      await tx.conversation.update({
+        where: { id: conv.id },
+        data: {
+          message_count: { increment: 2 },
+          last_activity_at: now,
         },
-      ],
+      });
+
+      return {
+        conversationId: conv.id,
+        userMessageId: uMid,
+        botMessageId: bMid,
+        userSequence: userSeq,
+        botSequence: botSeq,
+      };
     });
 
-    const encoder = new TextEncoder();
+  // Create embedding for the user message (Stage 1 requirement).
+  // We include extracted docs in the embedding input so future search works better.
+  const embeddingText = extractedTextBlock
+    ? `${body.message}\n\n${extractedTextBlock}`
+    : body.message;
 
-    let fullReply = "";
+  // Best-effort: embedding failure must not break chat.
+  createEmbeddingForUserMessage({ messageId: userMessageId, text: embeddingText }).catch((e) => {
+    console.warn("[api/chat] embedding failed", e);
+  });
 
-    const readable = new ReadableStream<Uint8Array>({
-      start(controller) {
+  // Build model input with DB history.
+  const historyLimit = 40;
+  const history = await prisma.message.findMany({
+    where: { conversation_id: conversationId },
+    orderBy: { sequence: "desc" },
+    take: historyLimit,
+    select: {
+      role: true,
+      content_original_md: true,
+      sequence: true,
+    },
+  });
+
+  const historyAsc = (history.slice().reverse() as unknown as HistoryItem[]);
+
+  const textModelKind = chooseTextModelKind({
+    message: body.message,
+    extractedDocuments: body.extractedDocuments ?? [],
+    attachments: body.attachments as any,
+  });
+  const model = selectBotCatTextModel(textModelKind);
+
+  const extractedDocsForLLM = extractedTextBlock ? `\n\n${extractedTextBlock}` : "";
+
+  const inputs: any[] = [
+    { type: "input_text" as const, text: BOTCAT_CHAT_PROMPT },
+
+    ...historyAsc.map((m: HistoryItem) => ({
+      type: "input_text" as const,
+      text: `${m.role}:\n${m.content_original_md}`,
+    })),
+
+    {
+      type: "input_text" as const,
+      text: `${body.message}${extractedDocsForLLM}`,
+    },
+
+    ...((body.attachments ?? [])
+      .map((a) => toOpenAIInputFromAttachment(a as any))
+      .filter(Boolean)),
+  ];
+
+  const stream = await openai.responses.stream({
+    model,
+    input: inputs,
+  });
+
+  const encoder = new TextEncoder();
+
+  const readable = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          sseEvent("meta", {
+            chatName,
+            model,
+            mode: textModelKind,
+            userMessageId,
+            userSequence,
+            usedHistoryCount: historyAsc.length,
+            extractedDocuments: (body.extractedDocuments ?? []).map((d) => ({
+              attachmentId: d.attachmentId,
+              fileName: d.fileName,
+              mimeType: d.mimeType,
+              textChars: d.text.length,
+              trimmed: d.text.includes("[TRIMMED]"),
+            })),
+          })
+        )
+      );
+
+      let fullText = "";
+
+      try {
+        for await (const event of stream) {
+          if ((event as any).type === "response.output_text.delta") {
+            const delta = (event as any).delta as string;
+            fullText += delta;
+            controller.enqueue(encoder.encode(sseEvent("delta", { delta })));
+          }
+        }
+
+        await prisma.message.create({
+          data: {
+            conversation_id: conversationId,
+            message_id: botMessageId,
+            role: "BotCat",
+            content_original_md: fullText,
+            content_translated_md: null,
+            has_attachments: false,
+            has_links: false,
+            is_voice: false,
+            created_at: new Date(),
+            sequence: botSequence,
+          },
+        });
+
         controller.enqueue(
           encoder.encode(
-            sse(
-              {
-                ok: true,
-                chatName,
-                model,
-                userMessageId,
-                attachmentsCount: parsedAttachments.length,
-              },
-              "meta"
-            )
+            sseEvent("final", {
+              chatName,
+              reply: fullText,
+              botMessageId,
+            })
           )
         );
 
-        (async () => {
-          try {
-            for await (const event of stream) {
-              if (event.type === "response.output_text.delta") {
-                const delta = event.delta ?? "";
-                if (delta) {
-                  fullReply += delta;
-                  controller.enqueue(encoder.encode(sse({ delta }, "delta")));
-                }
-              }
+        controller.close();
+      } catch (e: any) {
+        controller.enqueue(
+          encoder.encode(
+            sseEvent("error", {
+              error: e?.message ?? "Unknown error",
+            })
+          )
+        );
+        controller.close();
+      }
+    },
+  });
 
-              if (event.type === "response.completed") {
-                break;
-              }
-            }
-
-            await stream.done();
-
-            // 3.1. Перевод ответа BotCat на RU
-            const botTranslation = await detectAndTranslate(fullReply);
-            const botTranslatedMd = botTranslation.translated_md ?? "";
-
-            const botHasLinks = detectHasLinks(fullReply);
-            const botIsVoice = detectIsVoice(fullReply);
-
-            // 4. Сохраняем ответ BotCat
-            const botSequence = conversation!.message_count + 1;
-            const botMessageId = generateMessageId(chatName!, "b", botSequence);
-
-            await prisma.message.create({
-              data: {
-                conversation_id: conversation!.id,
-                message_id: botMessageId,
-                role: "BotCat",
-                content_original_md: fullReply,
-                content_translated_md: botTranslatedMd,
-                has_attachments: false,
-                has_links: botHasLinks,
-                is_voice: botIsVoice,
-                created_at: new Date(),
-                sequence: botSequence,
-              },
-            });
-
-            await prisma.conversation.update({
-              where: { id: conversation!.id },
-              data: {
-                last_activity_at: new Date(),
-                message_count: botSequence,
-              },
-            });
-
-            controller.enqueue(
-              encoder.encode(
-                sse(
-                  {
-                    ok: true,
-                    chatName,
-                    model,
-                    botMessageId,
-                    reply: fullReply,
-                  },
-                  "final"
-                )
-              )
-            );
-            controller.close();
-          } catch (e) {
-            controller.enqueue(
-              encoder.encode(
-                sse({ ok: false, error: "Internal Server Error" }, "error")
-              )
-            );
-            controller.close();
-          }
-        })();
-      },
-      cancel() {
-        try {
-          stream.abort();
-        } catch {
-          // ignore
-        }
-      },
-    });
-
-    return new Response(readable, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      },
-    });
-  } catch (error) {
-    console.error("[/api/chat] Unexpected error:", error);
-    return new Response(
-      JSON.stringify({ ok: false, error: "Internal Server Error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  return new Response(readable, { headers: sseHeaders() });
 }

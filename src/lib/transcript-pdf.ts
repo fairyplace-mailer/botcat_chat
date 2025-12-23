@@ -1,22 +1,13 @@
-import type { BotCatFinalJson } from "@/lib/botcat-final-json";
 import puppeteer from "puppeteer";
 
 /**
- * Генерация PDF строго ИЗ HTML-страницы /conversations/[chatName].
+ * PDF generation must be based on HTML content (not remote URLs) to guarantee
+ * full identity between HTML and PDF and to avoid APP_BASE_URL dependency.
  */
-export async function buildTranscriptPdf(
-  data: BotCatFinalJson
-): Promise<Uint8Array> {
-  const appBaseUrl = process.env.APP_BASE_URL;
-
-  if (!appBaseUrl || !appBaseUrl.trim()) {
-    throw new Error("APP_BASE_URL is not set");
+export async function buildPdfFromHtml(html: string): Promise<Uint8Array> {
+  if (!html || !html.trim()) {
+    throw new Error("buildPdfFromHtml: html is empty");
   }
-
-  const chatName = data.chatName;
-  const htmlUrl = `${appBaseUrl.replace(/\/$/, "")}/conversations/${encodeURIComponent(
-    chatName
-  )}`;
 
   const browser = await puppeteer.launch({
     headless: true,
@@ -25,7 +16,7 @@ export async function buildTranscriptPdf(
   try {
     const page = await browser.newPage();
 
-    await page.goto(htmlUrl, {
+    await page.setContent(html, {
       waitUntil: "networkidle0",
     });
 

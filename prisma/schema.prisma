@@ -70,9 +70,23 @@ model Message {
 
   conversation Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
   attachments  Attachment[]
+  embedding    MessageEmbedding?
 
   @@index([conversation_id, sequence])
   @@index([conversation_id, created_at])
+}
+
+model MessageEmbedding {
+  id           String   @id @default(uuid())
+  message_id   String   @unique
+  model        String
+  vector       Json
+  dims         Int
+  created_at   DateTime @default(now())
+
+  message Message @relation(fields: [message_id], references: [message_id], onDelete: Cascade)
+
+  @@index([created_at])
 }
 
 model Attachment {
