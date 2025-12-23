@@ -6,7 +6,7 @@
 
 ## 0. Context and scope
 
-This repository contains BotCat Consultant – a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates internal transcript artifacts and sends an internal notification email.
+This repository contains BotCat Consultant – a web chat (Next.js) with a backend on Vercel. The backend integrates with OpenAI, persists transcripts, and (when finalized by the orchestrator) generates transcript artifacts and sends an internal notification email.
 
 ### 0.1 Product versions
 
@@ -142,48 +142,55 @@ The system supports **two transcript views**:
 - **Internal (RU translated)** – used for internal team workflows and internal email.
 - **Original** – in the original conversation language (no translation).
 
-For each chat we support 4 artifacts:
+For each chat we generate 4 artifacts:
 
 1) `HTML_internal_ru`
 2) `PDF_internal_ru`
 3) `HTML_original`
 4) `PDF_original`
 
-### 5.2 Storage rules (current)
+### 5.2 Storage rules (MANDATORY)
 
 - **HTML artifacts** may be stored/published via Blob and accessible from `STATIC_BASE_URL`.
 - **PDF artifacts are stored ONLY in Google Drive** (no PDF in Blob) to avoid Blob quota issues.
 
-### 5.3 Stage enablement
+### 5.3 PDF generation rule (MANDATORY)
+
+**PDF must be generated from the corresponding HTML string** to guarantee identical content/layout:
+- `PDF_internal_ru` is generated from `HTML_internal_ru`.
+- `PDF_original` is generated from `HTML_original`.
+
+No PDF generation is allowed via remote URLs or via `APP_BASE_URL`.
+
+### 5.4 Stage enablement
 
 **Stage 1 (v1.0) – enabled:**
-- Send **1 internal email** to `fairyplace.tm@gmail.com`.
-- Provide links to:
-  - **1 HTML (internal RU)**
-  - **1 PDF (internal RU)**
+- Generate and persist all 4 artifacts:
+  - `HTML_internal_ru`, `PDF_internal_ru`, `HTML_original`, `PDF_original`.
+- Send **1 internal email** to `fairyplace.tm@gmail.com` (or `MAIL_TO_INTERNAL`) with links to:
+  - internal HTML
+  - internal PDF
+- **UI does not expose** download links/buttons for original/client artifacts.
 
-**Stage 2/3 (v2.0) – enabled:**
-- Send **1 internal email** to `fairyplace.tm@gmail.com` with links to:
-  - **HTML_internal_ru** (in email)
-  - **PDF_internal_ru** (in email)
-- UI provides access (like ChatGPT links/buttons) to:
-  - **HTML_original**
-  - **PDF_original**
+**Stage 2 (v1.0) – enabled:**
+- UI adds an option “Download PDF ‘Chat_Name’” for **original/client** PDF.
 
-### 5.4 Public routes for accessing artifacts
+**Stage 3 (v2.0) – later.**
+
+### 5.5 Public routes for accessing artifacts
 
 We use project routes under the static domain:
 
+Internal:
 - HTML internal: `GET ${STATIC_BASE_URL}/t/<chatName>/html`
 - PDF internal: `GET ${STATIC_BASE_URL}/t/<chatName>/pdf`
 
+Original (public/client):
+- HTML original: `GET ${STATIC_BASE_URL}/t/<chatName>/public/html`
+- PDF original: `GET ${STATIC_BASE_URL}/t/<chatName>/public/pdf`
+
 Notes:
 - `.../t/<chatName>/pdf` returns the PDF from **Google Drive** (stream/redirect), but PDF is stored in Drive.
-
-(When Stage 2/3 is implemented we will add:
-- `GET ${STATIC_BASE_URL}/t/<chatName>/html/original`
-- `GET ${STATIC_BASE_URL}/t/<chatName>/pdf/original`
-)
 
 ---
 
@@ -215,6 +222,10 @@ Internal email must include:
 - footer:
   - “Email with conversation materials. Links are valid for 30 days”
   - “Sent by FairyPlace™ Mailer”
+
+### 7.1 Client email (CANCELLED)
+
+Client emails are **not** sent in any stage.
 
 ---
 
