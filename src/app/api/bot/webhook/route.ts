@@ -7,7 +7,7 @@ import {
 } from "@/server/attachments/blob-mapper";
 import { buildFinalJsonByChatName } from "@/lib/botcat-final-json";
 import { buildTranscriptHtml } from "@/lib/transcript-html";
-import { buildTranscriptPdf } from "@/lib/transcript-pdf";
+import { buildPdfFromHtml } from "@/lib/transcript-pdf";
 import { uploadPdfToDrive } from "@/lib/google/drive";
 import { sendTranscriptEmail } from "@/lib/email-sender";
 
@@ -25,8 +25,9 @@ interface BotCatMessageJson {
 }
 
 interface BotCatTranslatedMessageJson {
+  messageId: string;
+  role: "User" | "BotCat";
   contentTranslated_md: string;
-  language: string;
 }
 
 interface BotCatFinalJsonIncoming {
@@ -34,13 +35,12 @@ interface BotCatFinalJsonIncoming {
   chatName: string;
   languageOriginal: string;
   messages: BotCatMessageJson[];
-  translatedMessages: Record<string, BotCatTranslatedMessageJson | undefined>;
+  translatedMessages: BotCatTranslatedMessageJson[];
   attachments: BotCatAttachmentJson[] | null | undefined;
   preamble_md: string;
   footerInternal_md: string;
   footerClient_md: string;
   sendToInternal: boolean;
-  userEmails?: string[] | null;
 }
 
 function parseIsoDate(value: string, fieldName: string): Date {
@@ -60,7 +60,20 @@ type ConversationMeta = {
   staticHtmlBlobUrl?: string;
   staticHtmlExpiresAt?: string;
   internalPdfDriveFileId?: string;
+  publicHtmlBlobUrl?: string;
+  publicHtmlExpiresAt?: string;
+  publicPdfDriveFileId?: string;
 };
+
+function buildTranslatedMap(translatedMessages: BotCatTranslatedMessageJson[]) {
+  const map = new Map<string, BotCatTranslatedMessageJson>();
+  for (const tm of translatedMessages ?? []) {
+    if (tm && typeof tm.messageId === "string" && tm.messageId.trim()) {
+      map.set(tm.messageId, tm);
+    }
+  }
+  return map;
+}
 
 export async function POST(req: NextRequest) {
   const receivedAt = new Date();
@@ -145,8 +158,10 @@ export async function POST(req: NextRequest) {
 
     conversationId = conversation.id;
 
+    const translatedById = buildTranslatedMap(payload.translatedMessages ?? []);
+
     const messagesData = payload.messages.map((msg, index) => {
-      const translated = payload.translatedMessages?.[msg.messageId];
+      const translated = translatedById.get(msg.messageId);
 
       return {
         conversation_id: conversation.id,
@@ -190,34 +205,52 @@ export async function POST(req: NextRequest) {
     try {
       const finalJson = await buildFinalJsonByChatName(payload.chatName);
 
-      // 1) Generate internal HTML transcript and publish to Blob
+      // 1) Generate HTML transcripts and publish to Blob
       const htmlInternal = buildTranscriptHtml(finalJson, "internal");
-      const htmlBlob = await put(
-        `transcripts/${finalJson.chatName}.html`,
-        htmlInternal,
-        {
+      const htmlPublic = buildTranscriptHtml(finalJson, "public");
+
+      const [internalBlob, publicBlob] = await Promise.all([
+        put(`transcripts/internal/${finalJson.chatName}.html`, htmlInternal, {
           access: "public",
           contentType: "text/html; charset=utf-8",
           addRandomSuffix: true,
-        }
-      );
+        }),
+        put(`transcripts/public/${finalJson.chatName}.html`, htmlPublic, {
+          access: "public",
+          contentType: "text/html; charset=utf-8",
+          addRandomSuffix: true,
+        }),
+      ]);
 
-      // 2) Generate PDF (internal) and store it in Drive only
-      const pdfBytes = await buildTranscriptPdf(finalJson);
-      const pdfBuffer = Buffer.from(pdfBytes);
+      // 2) Generate PDFs from HTML (Drive only)
+      const [internalPdfBytes, publicPdfBytes] = await Promise.all([
+        buildPdfFromHtml(htmlInternal),
+        buildPdfFromHtml(htmlPublic),
+      ]);
 
-      const driveResult = await uploadPdfToDrive({
-        fileName: `${payload.chatName}.pdf`,
-        pdfBuffer,
-      });
+      const [internalDriveResult, publicDriveResult] = await Promise.all([
+        uploadPdfToDrive({
+          fileName: `${payload.chatName}.pdf`,
+          pdfBuffer: Buffer.from(internalPdfBytes),
+        }),
+        uploadPdfToDrive({
+          fileName: `${payload.chatName}.public.pdf`,
+          pdfBuffer: Buffer.from(publicPdfBytes),
+        }),
+      ]);
 
       // Persist published URLs into Conversation.meta
       const prevMeta = (conversation.meta ?? {}) as ConversationMeta;
+      const expiresAtIso = addDays(receivedAt, 30).toISOString();
+
       const nextMeta: ConversationMeta = {
         ...prevMeta,
-        staticHtmlBlobUrl: htmlBlob.url,
-        staticHtmlExpiresAt: addDays(receivedAt, 30).toISOString(),
-        internalPdfDriveFileId: driveResult.fileId,
+        staticHtmlBlobUrl: internalBlob.url,
+        staticHtmlExpiresAt: expiresAtIso,
+        internalPdfDriveFileId: internalDriveResult.fileId,
+        publicHtmlBlobUrl: publicBlob.url,
+        publicHtmlExpiresAt: expiresAtIso,
+        publicPdfDriveFileId: publicDriveResult.fileId,
       };
 
       await prisma.conversation.update({
@@ -225,52 +258,22 @@ export async function POST(req: NextRequest) {
         data: { meta: nextMeta as any },
       });
 
-      type EmailJob = {
-        kind: "internal" | "client";
-        to: string;
-        subject: string;
-      };
-
-      const emailJobs: EmailJob[] = [];
-
       if (finalJson.sendToInternal) {
         const internalTo =
           process.env.MAIL_TO_INTERNAL?.trim() || "fairyplace.tm@gmail.com";
 
-        emailJobs.push({
-          kind: "internal",
-          to: internalTo,
-          subject: `BotCat Transcript: ${finalJson.chatName}`,
-        });
-      }
-
-      const userEmails = Array.isArray(payload.userEmails)
-        ? payload.userEmails.filter(
-            (e): e is string => typeof e === "string" && e.trim().length > 0
-          )
-        : [];
-
-      for (const email of userEmails) {
-        emailJobs.push({
-          kind: "client",
-          to: email.trim(),
-          subject: `Your BotCat Transcript: ${finalJson.chatName}`,
-        });
-      }
-
-      for (const job of emailJobs) {
         try {
           const sendResult = await sendTranscriptEmail({
-            kind: job.kind,
-            to: job.to,
+            kind: "internal",
+            to: internalTo,
             finalJson,
           });
 
           await prisma.emailLog.create({
             data: {
               conversation_id: conversation.id,
-              recipient_email: job.to,
-              subject: job.subject,
+              recipient_email: internalTo,
+              subject: `BotCat Transcript: ${finalJson.chatName}`,
               status: "sent",
               provider_message_id: sendResult.id,
               error_message: null,
@@ -287,8 +290,8 @@ export async function POST(req: NextRequest) {
           await prisma.emailLog.create({
             data: {
               conversation_id: conversation.id,
-              recipient_email: job.to,
-              subject: job.subject,
+              recipient_email: internalTo,
+              subject: `BotCat Transcript: ${finalJson.chatName}`,
               status: "failed",
               provider_message_id: null,
               error_message: msg,
