@@ -34,7 +34,14 @@ interface BotCatTranslatedMessageJson {
 interface BotCatFinalJsonIncoming {
   schemaVersion?: string | null;
   chatName: string;
-  languageOriginal: string;
+  /**
+   * Canonical field name per docs/spec.md
+   */
+  languageOriginal?: string;
+  /**
+   * Legacy alias observed in existing integrations/tests
+   */
+  userLanguage?: string;
   messages: BotCatMessageJson[];
   translatedMessages: BotCatTranslatedMessageJson[];
   attachments: BotCatAttachmentJson[] | null | undefined;
@@ -127,6 +134,21 @@ async function ensureImagePreviews(params: {
   }
 }
 
+function normalizeLanguageOriginal(payload: BotCatFinalJsonIncoming): string {
+  const lang =
+    (typeof payload.languageOriginal === "string" && payload.languageOriginal) ||
+    (typeof payload.userLanguage === "string" && payload.userLanguage) ||
+    "";
+
+  const normalized = lang.trim();
+  if (!normalized) {
+    throw new Error(
+      'ValidationError: "languageOriginal" is required (or legacy "userLanguage")'
+    );
+  }
+  return normalized;
+}
+
 export async function POST(req: NextRequest) {
   const receivedAt = new Date();
   let rawPayload: unknown = null;
@@ -171,6 +193,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const languageOriginal = normalizeLanguageOriginal(payload);
+
     const sortedMessages = [...payload.messages].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt)
     );
@@ -191,7 +215,7 @@ export async function POST(req: NextRequest) {
         chat_name: payload.chatName,
         user_id: null,
         status: "closed",
-        language_original: payload.languageOriginal,
+        language_original: languageOriginal,
         send_to_internal: payload.sendToInternal,
         started_at: startedAt,
         finished_at: finishedAt,
@@ -200,7 +224,7 @@ export async function POST(req: NextRequest) {
       },
       update: {
         status: "closed",
-        language_original: payload.languageOriginal,
+        language_original: languageOriginal,
         send_to_internal: payload.sendToInternal,
         finished_at: finishedAt,
         last_activity_at: finishedAt,
