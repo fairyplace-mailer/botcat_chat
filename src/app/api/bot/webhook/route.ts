@@ -47,7 +47,7 @@ interface BotCatFinalJsonIncoming {
 function parseIsoDate(value: string, fieldName: string): Date {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
-    throw new Error(`Invalid ISO date in field "${fieldName}": ${value}`);
+    throw new Error(`Invalid ISO date in field \"${fieldName}\": ${value}`);
   }
   return d;
 }
@@ -94,7 +94,8 @@ async function ensureImagePreviews(params: {
   });
 
   const toGenerate = attachments.filter(
-    (a) => !!a.blob_url_original && !a.blob_url_preview
+    (a: { blob_url_original: string | null; blob_url_preview: string | null }) =>
+      !!a.blob_url_original && !a.blob_url_preview
   );
 
   for (const att of toGenerate) {
