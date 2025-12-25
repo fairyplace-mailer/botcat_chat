@@ -10,6 +10,7 @@ import { buildTranscriptHtml } from "@/lib/transcript-html";
 import { buildPdfFromHtml } from "@/lib/transcript-pdf";
 import { uploadPdfToDrive } from "@/lib/google/drive";
 import { sendTranscriptEmail } from "@/lib/email-sender";
+import { generateWebpPreviewFromBlobUrl } from "@/server/attachments/preview";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,6 +74,56 @@ function buildTranslatedMap(translatedMessages: BotCatTranslatedMessageJson[]) {
     }
   }
   return map;
+}
+
+async function ensureImagePreviews(params: {
+  conversationId: string;
+  receivedAt: Date;
+}) {
+  const attachments = await prisma.attachment.findMany({
+    where: {
+      conversation_id: params.conversationId,
+      mime_type: { startsWith: "image/" },
+      deleted_at: null,
+    },
+    select: {
+      id: true,
+      blob_url_original: true,
+      blob_url_preview: true,
+    },
+  });
+
+  const toGenerate = attachments.filter(
+    (a) => !!a.blob_url_original && !a.blob_url_preview
+  );
+
+  for (const att of toGenerate) {
+    const originalUrl = att.blob_url_original;
+    if (!originalUrl) continue;
+
+    const preview = await generateWebpPreviewFromBlobUrl({
+      blobUrlOriginal: originalUrl,
+    });
+
+    const previewBlob = await put(
+      `previews/${params.conversationId}/${att.id}.webp`,
+      preview.buffer,
+      {
+        access: "public",
+        contentType: preview.contentType,
+        addRandomSuffix: true,
+      }
+    );
+
+    await prisma.attachment.update({
+      where: { id: att.id },
+      data: {
+        blob_url_preview: previewBlob.url,
+        // previews follow the same retention as originals
+        expires_at: addDays(params.receivedAt, 30),
+      },
+    });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -199,6 +250,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Mandatory: generate image previews for transcript artifacts
+    await ensureImagePreviews({
+      conversationId: conversation.id,
+      receivedAt,
+    });
+
     /**
      * [post-processing]
      */
@@ -264,7 +321,6 @@ export async function POST(req: NextRequest) {
 
         try {
           const sendResult = await sendTranscriptEmail({
-            kind: "internal",
             to: internalTo,
             finalJson,
           });
