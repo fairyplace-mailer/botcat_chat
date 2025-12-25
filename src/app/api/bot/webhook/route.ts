@@ -15,19 +15,39 @@ import { generateWebpPreviewFromBlobUrl } from "@/server/attachments/preview";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type IncomingRole =
+  | "user"
+  | "assistant"
+  | "User"
+  | "BotCat"
+  | "system"
+  | "tool";
+
+function normalizeIncomingRole(role: unknown): "user" | "assistant" {
+  const r = typeof role === "string" ? role : "";
+  if (r === "user" || r === "User") return "user";
+  if (r === "assistant" || r === "BotCat") return "assistant";
+  // default to assistant (safer than failing hard; role isn't used for constraints)
+  return "assistant";
+}
+
 interface BotCatMessageJson {
   messageId: string;
-  role: "User" | "BotCat";
-  contentOriginal_md: string;
-  hasAttachments: boolean;
-  hasLinks: boolean;
-  isVoice: boolean;
+  role: IncomingRole;
+  // canonical per docs/spec.md
+  content?: string;
+  // legacy / older naming
+  contentOriginal_md?: string;
+  hasAttachments?: boolean;
+  hasLinks?: boolean;
+  isVoice?: boolean;
   createdAt: string;
+  attachments?: unknown;
 }
 
 interface BotCatTranslatedMessageJson {
   messageId: string;
-  role: "User" | "BotCat";
+  role: IncomingRole;
   contentTranslated_md: string;
 }
 
@@ -149,6 +169,18 @@ function normalizeLanguageOriginal(payload: BotCatFinalJsonIncoming): string {
   return normalized;
 }
 
+function normalizeMessageContent(msg: BotCatMessageJson): string {
+  const c = typeof msg.content === "string" ? msg.content : "";
+  const legacy =
+    typeof msg.contentOriginal_md === "string" ? msg.contentOriginal_md : "";
+  const value = (c || legacy).trim();
+  if (!value) {
+    // Prisma requires content_original_md; use a visible marker instead of undefined
+    return "[EMPTY]";
+  }
+  return value;
+}
+
 export async function POST(req: NextRequest) {
   const receivedAt = new Date();
   let rawPayload: unknown = null;
@@ -242,12 +274,12 @@ export async function POST(req: NextRequest) {
       return {
         conversation_id: conversation.id,
         message_id: msg.messageId,
-        role: msg.role,
-        content_original_md: msg.contentOriginal_md,
+        role: normalizeIncomingRole(msg.role),
+        content_original_md: normalizeMessageContent(msg),
         content_translated_md: translated?.contentTranslated_md ?? null,
-        has_attachments: msg.hasAttachments,
-        has_links: msg.hasLinks,
-        is_voice: msg.isVoice,
+        has_attachments: !!msg.hasAttachments,
+        has_links: !!msg.hasLinks,
+        is_voice: !!msg.isVoice,
         created_at: parseIsoDate(
           msg.createdAt,
           `messages[${index}].createdAt`
