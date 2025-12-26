@@ -41,8 +41,7 @@ export function buildTranscriptHtml(
   data: BotCatFinalJson,
   mode: TranscriptMode = "internal"
 ): string {
-  const { chatName, preamble_md, messages, attachments, languageOriginal } =
-    data;
+  const { chatName, preamble_md, messages, attachments, languageOriginal } = data;
 
   // translatedMessages is an array per spec; build a quick lookup by messageId
   const translatedById = asTranslatedMap(data);
@@ -316,7 +315,7 @@ export function buildTranscriptHtml(
   const footerHtml = `
       <div class="footer-block">
         <p>Email with conversation materials. Links are valid for 30 days.</p>
-        <p>Sent by FairyPlace3 Mailer</p>
+        <p>Sent by FairyPlace Mailer</p>
       </div>
     `;
 
