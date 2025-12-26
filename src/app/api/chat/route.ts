@@ -81,20 +81,17 @@ type HistoryItem = {
   sequence: number;
 };
 
-function toOpenAIInputFromAttachment(a: BotCatAttachment) {
+function toOpenAIChatImagePartFromAttachment(a: BotCatAttachment) {
   const url = a.blobUrlOriginal ?? a.originalUrl;
   if (!url) return null;
 
   const mime = a.mimeType ?? "";
-  if (mime.startsWith("image/")) {
-    return {
-      type: "input_image" as const,
-      image_url: url,
-    };
-  }
+  if (!mime.startsWith("image/")) return null;
 
-  // IMPORTANT (per docs/spec.md): non-image files are NOT passed to LLM by URL.
-  return null;
+  return {
+    type: "image_url" as const,
+    image_url: { url },
+  };
 }
 
 function formatExtractedDocuments(docs: ExtractedDocument[]): string {
@@ -340,27 +337,44 @@ export async function POST(request: Request) {
 
   const extractedDocsForLLM = extractedTextBlock ? `\n\n${extractedTextBlock}` : "";
 
-  const inputs: any[] = [
-    { type: "input_text" as const, text: BOTCAT_CHAT_PROMPT },
+  const systemMessage = {
+    role: "system" as const,
+    content: BOTCAT_CHAT_PROMPT,
+  };
 
-    ...historyAsc.map((m: HistoryItem) => ({
-      type: "input_text" as const,
-      text: `${m.role}:\n${m.content_original_md}`,
-    })),
+  const historyMessages = historyAsc.map((m) => ({
+    role: m.role === "BotCat" ? ("assistant" as const) : ("user" as const),
+    content: `${m.content_original_md}`,
+  }));
 
+  const currentUserContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [
     {
-      type: "input_text" as const,
+      type: "text",
       text: `${body.message}${extractedDocsForLLM}`,
     },
-
-    ...((body.attachments ?? [])
-      .map((a) => toOpenAIInputFromAttachment(a as any))
-      .filter(Boolean)),
   ];
 
-  const stream = await openai.responses.stream({
+  // IMPORTANT (per docs/spec.md): non-image files are NOT passed to LLM by URL.
+  // Only images are passed as image_url parts.
+  for (const a of body.attachments ?? []) {
+    const part = toOpenAIChatImagePartFromAttachment(a as any);
+    if (part) currentUserContent.push(part);
+  }
+
+  const stream = await openai.chat.completions.create({
     model,
-    input: inputs,
+    stream: true,
+    messages: [
+      systemMessage,
+      ...historyMessages,
+      {
+        role: "user",
+        content: currentUserContent,
+      },
+    ],
   });
 
   const encoder = new TextEncoder();
@@ -390,9 +404,9 @@ export async function POST(request: Request) {
       let fullText = "";
 
       try {
-        for await (const event of stream) {
-          if ((event as any).type === "response.output_text.delta") {
-            const delta = (event as any).delta as string;
+        for await (const chunk of stream) {
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (typeof delta === "string" && delta.length > 0) {
             fullText += delta;
             controller.enqueue(encoder.encode(sseEvent("delta", { delta })));
           }
