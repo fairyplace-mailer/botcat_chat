@@ -1,6 +1,6 @@
-# BotCat Consultant
+# BotCat Consultant
 
-> This repository hosts **BotCat Consultant** (Stage 1 web chat) running on **Next.js (App Router)** + Vercel.
+> This repository hosts **BotCat Consultant** (Stage 1 web chat) running on **Next.js (App Router)** + Vercel.
 
 ## Quick regression test (Stage 1 finalization)
 
