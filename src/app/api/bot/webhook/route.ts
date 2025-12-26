@@ -71,10 +71,17 @@ interface BotCatFinalJsonIncoming {
   sendToInternal: boolean;
 }
 
+class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
 function parseIsoDate(value: string, fieldName: string): Date {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
-    throw new Error(`Invalid ISO date in field \"${fieldName}\": ${value}`);
+    throw new ValidationError(`Invalid ISO date in field "${fieldName}": ${value}`);
   }
   return d;
 }
@@ -162,8 +169,8 @@ function normalizeLanguageOriginal(payload: BotCatFinalJsonIncoming): string {
 
   const normalized = lang.trim();
   if (!normalized) {
-    throw new Error(
-      'ValidationError: "languageOriginal" is required (or legacy "userLanguage")'
+    throw new ValidationError(
+      '"languageOriginal" is required (or legacy "userLanguage")'
     );
   }
   return normalized;
@@ -179,6 +186,10 @@ function normalizeMessageContent(msg: BotCatMessageJson): string {
     return "[EMPTY]";
   }
   return value;
+}
+
+function isValidationError(e: unknown): e is ValidationError {
+  return e instanceof ValidationError;
 }
 
 export async function POST(req: NextRequest) {
@@ -431,6 +442,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (error: unknown) {
+    const isValidation = isValidationError(error);
+    const status = isValidation ? 400 : 500;
     const message =
       error instanceof Error
         ? error.message
@@ -438,14 +451,16 @@ export async function POST(req: NextRequest) {
         ? error
         : "Unknown error";
 
-    console.error("[Webhook] Error in /api/bot/webhook:", error);
+    if (!isValidation) {
+      console.error("[Webhook] Error in /api/bot/webhook:", error);
+    }
 
     try {
       await prisma.webhookLog.create({
         data: {
           conversation_id: conversationId,
           payload: rawPayload as any,
-          status_code: 500,
+          status_code: status,
           error_message: message,
         },
       });
@@ -456,9 +471,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: `InternalError: ${message}`,
+        error: `${isValidation ? "ValidationError" : "InternalError"}: ${message}`,
       },
-      { status: 500 }
+      { status }
     );
   }
 }
