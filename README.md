@@ -51,8 +51,8 @@ curl -i -L \
       { "messageId": "m2", "createdAt": "2025-12-25T00:00:01.000Z", "role": "assistant", "content": "OK. Test response.", "attachments": [] }
     ],
     "translatedMessages": [
-      { "messageId": "m1", "role": "user", "contentTranslated_md": "!  ." },
-      { "messageId": "m2", "role": "assistant", "contentTranslated_md": ".  ." }
+      { "messageId": "m1", "role": "user", "contentTranslated_md": "Hello (RU translation placeholder)." },
+      { "messageId": "m2", "role": "assistant", "contentTranslated_md": "OK (RU translation placeholder)." }
     ]
   }'
 ```
