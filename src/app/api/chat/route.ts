@@ -10,12 +10,8 @@ import { BOTCAT_CHAT_PROMPT } from "@/lib/botcat-chat-prompt";
 
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
 import { generateChatName, generateMessageId } from "@/lib/chat-ids";
-import {
-  openai,
-  selectBotCatEmbeddingModel,
-  selectBotCatTextModel,
-  type BotCatTextModelKind,
-} from "@/lib/openai";
+import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
+import { chooseBotCatModel } from "@/lib/model-router";
 import { mapBotCatAttachmentsArrayToDb } from "@/server/attachments/blob-mapper";
 
 function sha256HexShort(input: string): string {
@@ -124,33 +120,6 @@ function sseHeaders() {
 
 function sseEvent(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
-
-function chooseTextModelKind(params: {
-  message: string;
-  extractedDocuments: ExtractedDocument[];
-  attachments: BotCatAttachment[];
-}): BotCatTextModelKind {
-  const { message, extractedDocuments, attachments } = params;
-
-  const len = message.length;
-  const hasDocsText = extractedDocuments.some((d) => d.text && d.text.length > 0);
-  const hasImages = attachments.some((a) => (a.mimeType ?? "").startsWith("image/"));
-
-  const lower = message.toLowerCase();
-  const reasoningHints = [
-    "step by step",
-    "reasoning",
-    "prove",
-    "\u043e\u0431\u043e\u0441\u043d\u0443\u0439",
-    "\u043f\u043e\u0448\u0430\u0433\u043e\u0432\u043e",
-  ];
-
-  if (len > 2000 || reasoningHints.some((k) => lower.includes(k))) return "reasoning";
-
-  if (len > 800 || hasDocsText || hasImages) return "chat_strong";
-
-  return "chat";
 }
 
 async function createEmbeddingForUserMessage(params: {
@@ -328,12 +297,20 @@ export async function POST(request: Request) {
 
   const historyAsc = (history.slice().reverse() as unknown as HistoryItem[]);
 
-  const textModelKind = chooseTextModelKind({
+  const hasImages = (body.attachments ?? []).some((a) =>
+    (a.mimeType ?? "").startsWith("image/")
+  );
+  const extractedDocumentsChars = (body.extractedDocuments ?? []).reduce(
+    (sum, d) => sum + d.text.length,
+    0
+  );
+
+  const modelChoice = chooseBotCatModel({
     message: body.message,
-    extractedDocuments: body.extractedDocuments ?? [],
-    attachments: body.attachments as any,
+    extractedDocumentsChars,
+    hasImages,
+    historyMessagesCount: historyAsc.length,
   });
-  const model = selectBotCatTextModel(textModelKind);
 
   const extractedDocsForLLM = extractedTextBlock ? `\n\n${extractedTextBlock}` : "";
 
@@ -365,7 +342,7 @@ export async function POST(request: Request) {
   }
 
   const stream = await openai.chat.completions.create({
-    model,
+    model: modelChoice.model,
     stream: true,
     messages: [
       systemMessage,
@@ -385,8 +362,9 @@ export async function POST(request: Request) {
         encoder.encode(
           sseEvent("meta", {
             chatName,
-            model,
-            mode: textModelKind,
+            model: modelChoice.model,
+            mode: modelChoice.kind,
+            modelReason: modelChoice.reason,
             userMessageId,
             userSequence,
             usedHistoryCount: historyAsc.length,
