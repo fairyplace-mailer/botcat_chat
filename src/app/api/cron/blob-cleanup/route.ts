@@ -90,6 +90,26 @@ async function acquireDailyLock(params: {
   return true;
 }
 
+function getExpiredHtmlMetaKeys(meta: any, prefix: "internal" | "public"):
+  | {
+      urlKey: string;
+      expiresAtKey: string;
+      url: string;
+      expiresAtIso: string;
+    }
+  | null {
+  const urlKey = prefix === "internal" ? "staticHtmlBlobUrl" : "publicHtmlBlobUrl";
+  const expiresAtKey =
+    prefix === "internal" ? "staticHtmlExpiresAt" : "publicHtmlExpiresAt";
+
+  const url = typeof meta?.[urlKey] === "string" ? meta[urlKey] : null;
+  const expiresAtIso = typeof meta?.[expiresAtKey] === "string" ? meta[expiresAtKey] : null;
+
+  if (!url || !expiresAtIso) return null;
+
+  return { urlKey, expiresAtKey, url, expiresAtIso };
+}
+
 export async function GET() {
   const runStartedAt = new Date();
   const timeZone = process.env.TIMEZONE?.trim() || "Asia/Jerusalem";
@@ -163,7 +183,7 @@ export async function GET() {
       }
     }
 
-    // 2) Conversation published HTML cleanup
+    // 2) Conversation published HTML cleanup (internal + public)
     const conversations = await prisma.conversation.findMany({
       where: {
         meta: { not: null },
@@ -175,22 +195,26 @@ export async function GET() {
     for (const c of conversations) {
       try {
         const meta = (c.meta ?? {}) as any;
-        const url = typeof meta.staticHtmlBlobUrl === "string" ? meta.staticHtmlBlobUrl : null;
-        const expiresAtIso =
-          typeof meta.staticHtmlExpiresAt === "string" ? meta.staticHtmlExpiresAt : null;
+        let nextMeta = { ...meta };
+        let changed = false;
 
-        if (!url || !expiresAtIso) continue;
+        for (const prefix of ["internal", "public"] as const) {
+          const keys = getExpiredHtmlMetaKeys(meta, prefix);
+          if (!keys) continue;
 
-        const expiresAt = new Date(expiresAtIso);
-        if (Number.isNaN(expiresAt.getTime())) continue;
+          const expiresAt = new Date(keys.expiresAtIso);
+          if (Number.isNaN(expiresAt.getTime())) continue;
 
-        if (expiresAt >= runStartedAt) continue;
+          if (expiresAt >= runStartedAt) continue;
 
-        await del(url);
+          await del(keys.url);
 
-        const nextMeta = { ...meta };
-        delete nextMeta.staticHtmlBlobUrl;
-        delete nextMeta.staticHtmlExpiresAt;
+          delete nextMeta[keys.urlKey];
+          delete nextMeta[keys.expiresAtKey];
+          changed = true;
+        }
+
+        if (!changed) continue;
 
         await prisma.conversation.update({
           where: { id: c.id },
