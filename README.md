@@ -1,42 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BotCat Consultant
 
-## Vercel Preview links in PRs
+> This repository hosts **BotCat Consultant** (Stage 1 web chat) running on **Next.js (App Router)** + Vercel.
 
-This repo includes a GitHub Actions workflow that automatically upserts a PR comment with Vercel deployment status + preview URL.
+## Quick regression test (Stage 1 finalization)
 
-See: [`docs/vercel-preview.md`](docs/vercel-preview.md)
+These commands validate the end-to-end Stage 1 pipeline:
+- `POST /api/bot/webhook` accepts a finalization payload
+- generates **4 artifacts** (internal/public HTML + internal/public PDF)
+- publishes HTML via Blob (temporary)
+- stores PDFs in Google Drive
+- sends **internal email** with stable links under `STATIC_BASE_URL`
 
-## Getting Started
+### Preconditions
 
-First, run the development server:
+- You have a **Vercel Deployment Protection bypass token** (if preview/prod is protected).
+- You know `BOTCAT_WEBHOOK_SECRET` (if enabled).
+
+### Variables
+
+Replace the placeholders below:
+
+- `<DEPLOY_DOMAIN>`: e.g. `botcat-chat-xxxx.vercel.app` (or `fairyplace.net`)
+- `<BYPASS_TOKEN>`: Vercel protection bypass token
+- `<BOTCAT_WEBHOOK_SECRET>`: value of `BOTCAT_WEBHOOK_SECRET`
+- `<CHAT_NAME>`: unique chat name, e.g. `e2e-prod-noatt-001`
+
+### 1) Get bypass cookie (only if protected)
+
+```bash
+curl -i -L -c /tmp/vercel_cookies.txt \
+  'https://<DEPLOY_DOMAIN>/?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=<BYPASS_TOKEN>'
+```
+
+### 2) Finalize a transcript (no attachments)
+
+```bash
+curl -i -L \
+  -c /tmp/vercel_cookies.txt -b /tmp/vercel_cookies.txt \
+  -X POST 'https://<DEPLOY_DOMAIN>/api/bot/webhook?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=<BYPASS_TOKEN>' \
+  -H 'content-type: application/json' \
+  -H 'x-botcat-secret: <BOTCAT_WEBHOOK_SECRET>' \
+  --data-raw '{
+    "chatName": "<CHAT_NAME>",
+    "sendToInternal": true,
+    "userAgent": "curl-e2e",
+    "summary_en": "Test summary",
+    "languageOriginal": "en",
+    "messages": [
+      { "messageId": "m1", "createdAt": "2025-12-25T00:00:00.000Z", "role": "user", "content": "Hello! Test.", "attachments": [] },
+      { "messageId": "m2", "createdAt": "2025-12-25T00:00:01.000Z", "role": "assistant", "content": "OK. Test response.", "attachments": [] }
+    ],
+    "translatedMessages": [
+      { "messageId": "m1", "role": "user", "contentTranslated_md": "! ." },
+      { "messageId": "m2", "role": "assistant", "contentTranslated_md": ".  ." }
+    ]
+  }'
+```
+
+### 3) Verify artifact routes (internal + public)
+
+Internal:
+
+```bash
+curl -I -L -c /tmp/vercel_cookies.txt -b /tmp/vercel_cookies.txt \
+  'https://<DEPLOY_DOMAIN>/t/<CHAT_NAME>/html?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=<BYPASS_TOKEN>'
+
+curl -I -L -c /tmp/vercel_cookies.txt -b /tmp/vercel_cookies.txt \
+  'https://<DEPLOY_DOMAIN>/t/<CHAT_NAME>/pdf?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=<BYPASS_TOKEN>'
+```
+
+Public (original):
+
+```bash
+curl -I -L -c /tmp/vercel_cookies.txt -b /tmp/vercel_cookies.txt \
+  'https://<DEPLOY_DOMAIN>/t/<CHAT_NAME>/public/html?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=<BYPASS_TOKEN>'
+
+curl -I -L -c /tmp/vercel_cookies.txt -b /tmp/vercel_cookies.txt \
+  'https://<DEPLOY_DOMAIN>/t/<CHAT_NAME>/public/pdf?x-vercel-set-bypass-cookie=true&x-vercel-protection-bypass=<BYPASS_TOKEN>'
+```
+
+### 4) Verify stable links under static domain
+
+```bash
+curl -I -L 'https://static.fairyplace.net/t/<CHAT_NAME>/html'
+curl -I -L 'https://static.fairyplace.net/t/<CHAT_NAME>/pdf'
+```
+
+---
+
+## Dev
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open http://localhost:3000.
