@@ -313,18 +313,10 @@ export function buildTranscriptHtml(
     })
     .join("\n");
 
-  const footerHtml =
-    mode === "internal"
-      ? `
+  const footerHtml = `
       <div class="footer-block">
         <p>Email with conversation materials. Links are valid for 30 days.</p>
-        <p>Sent by FairyPlace™ Mailer</p>
-      </div>
-    `
-      : `
-      <div class="footer-block">
-        <p>Email with conversation materials. Links are valid for 30 days.</p>
-        <p>Sent by FairyPlace™ Mailer at the client's request</p>
+        <p>Sent by FairyPlace3 Mailer</p>
       </div>
     `;
 
