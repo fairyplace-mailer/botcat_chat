@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 /**
  * PDF generation must be based on HTML content (not remote URLs) to guarantee
@@ -9,8 +10,15 @@ export async function buildPdfFromHtml(html: string): Promise<Uint8Array> {
     throw new Error("buildPdfFromHtml: html is empty");
   }
 
+  // Vercel serverless/edge environments don't ship a system Chrome.
+  // Use a bundled Chromium compatible with serverless runtimes.
+  const executablePath = await chromium.executablePath();
+
   const browser = await puppeteer.launch({
-    headless: true,
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath,
+    headless: chromium.headless,
   });
 
   try {

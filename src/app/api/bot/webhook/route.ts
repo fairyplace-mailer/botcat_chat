@@ -10,30 +10,58 @@ import { buildTranscriptHtml } from "@/lib/transcript-html";
 import { buildPdfFromHtml } from "@/lib/transcript-pdf";
 import { uploadPdfToDrive } from "@/lib/google/drive";
 import { sendTranscriptEmail } from "@/lib/email-sender";
+import { generateWebpPreviewFromBlobUrl } from "@/server/attachments/preview";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type IncomingRole =
+  | "user"
+  | "assistant"
+  | "User"
+  | "BotCat"
+  | "system"
+  | "tool";
+
+function normalizeIncomingRole(role: unknown): "user" | "assistant" {
+  const r = typeof role === "string" ? role : "";
+  if (r === "user" || r === "User") return "user";
+  if (r === "assistant" || r === "BotCat") return "assistant";
+  // default to assistant (safer than failing hard; role isn't used for constraints)
+  return "assistant";
+}
+
 interface BotCatMessageJson {
   messageId: string;
-  role: "User" | "BotCat";
-  contentOriginal_md: string;
-  hasAttachments: boolean;
-  hasLinks: boolean;
-  isVoice: boolean;
+  role: IncomingRole;
+  // canonical per docs/spec.md
+  content?: string;
+  // legacy / older naming
+  contentOriginal_md?: string;
+  hasAttachments?: boolean;
+  hasLinks?: boolean;
+  isVoice?: boolean;
   createdAt: string;
+  attachments?: unknown;
 }
 
 interface BotCatTranslatedMessageJson {
   messageId: string;
-  role: "User" | "BotCat";
+  role: IncomingRole;
   contentTranslated_md: string;
 }
 
 interface BotCatFinalJsonIncoming {
   schemaVersion?: string | null;
   chatName: string;
-  languageOriginal: string;
+  /**
+   * Canonical field name per docs/spec.md
+   */
+  languageOriginal?: string;
+  /**
+   * Legacy alias observed in existing integrations/tests
+   */
+  userLanguage?: string;
   messages: BotCatMessageJson[];
   translatedMessages: BotCatTranslatedMessageJson[];
   attachments: BotCatAttachmentJson[] | null | undefined;
@@ -46,7 +74,7 @@ interface BotCatFinalJsonIncoming {
 function parseIsoDate(value: string, fieldName: string): Date {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) {
-    throw new Error(`Invalid ISO date in field "${fieldName}": ${value}`);
+    throw new Error(`Invalid ISO date in field \"${fieldName}\": ${value}`);
   }
   return d;
 }
@@ -73,6 +101,84 @@ function buildTranslatedMap(translatedMessages: BotCatTranslatedMessageJson[]) {
     }
   }
   return map;
+}
+
+async function ensureImagePreviews(params: {
+  conversationId: string;
+  receivedAt: Date;
+}) {
+  const attachments = await prisma.attachment.findMany({
+    where: {
+      conversation_id: params.conversationId,
+      mime_type: { startsWith: "image/" },
+      deleted_at: null,
+    },
+    select: {
+      id: true,
+      blob_url_original: true,
+      blob_url_preview: true,
+    },
+  });
+
+  const toGenerate = attachments.filter(
+    (a: { blob_url_original: string | null; blob_url_preview: string | null }) =>
+      !!a.blob_url_original && !a.blob_url_preview
+  );
+
+  for (const att of toGenerate) {
+    const originalUrl = att.blob_url_original;
+    if (!originalUrl) continue;
+
+    const preview = await generateWebpPreviewFromBlobUrl({
+      blobUrlOriginal: originalUrl,
+    });
+
+    const previewBlob = await put(
+      `previews/${params.conversationId}/${att.id}.webp`,
+      preview.buffer,
+      {
+        access: "public",
+        contentType: preview.contentType,
+        addRandomSuffix: true,
+      }
+    );
+
+    await prisma.attachment.update({
+      where: { id: att.id },
+      data: {
+        blob_url_preview: previewBlob.url,
+        // previews follow the same retention as originals
+        expires_at: addDays(params.receivedAt, 30),
+      },
+    });
+  }
+}
+
+function normalizeLanguageOriginal(payload: BotCatFinalJsonIncoming): string {
+  const lang =
+    (typeof payload.languageOriginal === "string" && payload.languageOriginal) ||
+    (typeof payload.userLanguage === "string" && payload.userLanguage) ||
+    "";
+
+  const normalized = lang.trim();
+  if (!normalized) {
+    throw new Error(
+      'ValidationError: "languageOriginal" is required (or legacy "userLanguage")'
+    );
+  }
+  return normalized;
+}
+
+function normalizeMessageContent(msg: BotCatMessageJson): string {
+  const c = typeof msg.content === "string" ? msg.content : "";
+  const legacy =
+    typeof msg.contentOriginal_md === "string" ? msg.contentOriginal_md : "";
+  const value = (c || legacy).trim();
+  if (!value) {
+    // Prisma requires content_original_md; use a visible marker instead of undefined
+    return "[EMPTY]";
+  }
+  return value;
 }
 
 export async function POST(req: NextRequest) {
@@ -119,6 +225,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const languageOriginal = normalizeLanguageOriginal(payload);
+
     const sortedMessages = [...payload.messages].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt)
     );
@@ -139,7 +247,7 @@ export async function POST(req: NextRequest) {
         chat_name: payload.chatName,
         user_id: null,
         status: "closed",
-        language_original: payload.languageOriginal,
+        language_original: languageOriginal,
         send_to_internal: payload.sendToInternal,
         started_at: startedAt,
         finished_at: finishedAt,
@@ -148,7 +256,7 @@ export async function POST(req: NextRequest) {
       },
       update: {
         status: "closed",
-        language_original: payload.languageOriginal,
+        language_original: languageOriginal,
         send_to_internal: payload.sendToInternal,
         finished_at: finishedAt,
         last_activity_at: finishedAt,
@@ -166,12 +274,12 @@ export async function POST(req: NextRequest) {
       return {
         conversation_id: conversation.id,
         message_id: msg.messageId,
-        role: msg.role,
-        content_original_md: msg.contentOriginal_md,
+        role: normalizeIncomingRole(msg.role),
+        content_original_md: normalizeMessageContent(msg),
         content_translated_md: translated?.contentTranslated_md ?? null,
-        has_attachments: msg.hasAttachments,
-        has_links: msg.hasLinks,
-        is_voice: msg.isVoice,
+        has_attachments: !!msg.hasAttachments,
+        has_links: !!msg.hasLinks,
+        is_voice: !!msg.isVoice,
         created_at: parseIsoDate(
           msg.createdAt,
           `messages[${index}].createdAt`
@@ -198,6 +306,12 @@ export async function POST(req: NextRequest) {
         data: attachmentsData,
       });
     }
+
+    // Mandatory: generate image previews for transcript artifacts
+    await ensureImagePreviews({
+      conversationId: conversation.id,
+      receivedAt,
+    });
 
     /**
      * [post-processing]
@@ -264,7 +378,6 @@ export async function POST(req: NextRequest) {
 
         try {
           const sendResult = await sendTranscriptEmail({
-            kind: "internal",
             to: internalTo,
             finalJson,
           });

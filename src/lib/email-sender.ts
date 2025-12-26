@@ -26,6 +26,7 @@ function buildTranscriptLinks(chatName: string) {
     };
   }
 
+  // Internal artifacts by default (Stage 1 requirement)
   return {
     htmlUrl: `${staticBaseUrl}/t/${encodeURIComponent(chatName)}/html`,
     pdfUrl: `${staticBaseUrl}/t/${encodeURIComponent(chatName)}/pdf`,
@@ -42,11 +43,10 @@ function buildBrief(finalJson: BotCatFinalJson) {
 }
 
 export async function sendTranscriptEmail(params: {
-  kind: "internal" | "client";
   to: string;
   finalJson: BotCatFinalJson;
 }) {
-  const { kind, to, finalJson } = params;
+  const { to, finalJson } = params;
 
   const resend = getResend();
 
@@ -55,22 +55,12 @@ export async function sendTranscriptEmail(params: {
 
   const headerUrl = "https://static.fairyplace.net/header.v3.png";
 
-  const footerInternalLines = [
+  const footerLines = [
     "Email with conversation materials. Links are valid for 30 days",
-    "Sent by FairyPlace\u0016\u0019 Mailer",
+    "Sent by FairyPlace™ Mailer",
   ];
 
-  const footerClientLines = [
-    "Email with conversation materials. Links are valid for 30 days",
-    "Sent by FairyPlace\u0016\u0019 Mailer",
-  ];
-
-  const footerLines = kind === "internal" ? footerInternalLines : footerClientLines;
-
-  const subject =
-    kind === "internal"
-      ? `BotCat Transcript: ${finalJson.chatName}`
-      : `Your BotCat Transcript: ${finalJson.chatName}`;
+  const subject = `BotCat Transcript: ${finalJson.chatName}`;
 
   const html = `
   <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; line-height:1.4">
