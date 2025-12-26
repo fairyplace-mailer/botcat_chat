@@ -117,16 +117,6 @@ function formatExtractedDocuments(docs: ExtractedDocument[]): string {
     .join("\n\n");
 }
 
-function toExtractedDocumentsMeta(docs: ExtractedDocument[]) {
-  return docs.map((d) => ({
-    attachmentId: d.attachmentId,
-    fileName: d.fileName,
-    mimeType: d.mimeType,
-    textChars: d.text.length,
-    trimmed: d.text.includes("[TRIMMED]"),
-  }));
-}
-
 function sseHeaders() {
   return {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -268,9 +258,6 @@ export async function POST(request: Request) {
           is_voice: false,
           created_at: now,
           sequence: userSeq,
-          meta: {
-            extractedDocuments: toExtractedDocumentsMeta(body.extractedDocuments ?? []),
-          },
         },
       });
 
