@@ -13,27 +13,27 @@ async function acquireLock(name: string, ttlMinutes: number) {
   const now = new Date();
   const lockedUntil = addMinutes(now, ttlMinutes);
 
-  try {
-    await prisma.cronLock.create({
-      data: { name, locked_at: now, locked_until: lockedUntil },
-    });
-    return true;
-  } catch {
-    // may already exist
-  }
+  // Ensure row exists without throwing unique-violation noise.
+  // If another worker did it first, upsert just updates the same row.
+  await prisma.cronLock.upsert({
+    where: { name },
+    create: { name, locked_at: new Date(0), locked_until: new Date(0) },
+    update: {},
+  });
 
-  const existing = await prisma.cronLock.findUnique({ where: { name } });
-  if (!existing) return false;
+  // Atomic acquisition: only one worker can update from expired -> locked.
+  const updated = await prisma.cronLock.updateMany({
+    where: {
+      name,
+      locked_until: { lt: now },
+    },
+    data: {
+      locked_at: now,
+      locked_until: lockedUntil,
+    },
+  });
 
-  if (existing.locked_until < now) {
-    await prisma.cronLock.update({
-      where: { name },
-      data: { locked_at: now, locked_until: lockedUntil },
-    });
-    return true;
-  }
-
-  return false;
+  return updated.count === 1;
 }
 
 export async function GET() {

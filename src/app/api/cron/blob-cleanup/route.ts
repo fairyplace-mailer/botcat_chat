@@ -54,40 +54,37 @@ async function acquireDailyLock(params: {
 
   const lockedUntil = addMinutes(now, 10);
 
-  const existing = await prisma.cronLock.findUnique({ where: { name } });
-
-  if (existing) {
-    const meta = (existing.meta ?? {}) as any;
-    const lastDateKey = typeof meta?.dateKey === "string" ? meta.dateKey : null;
-
-    // Already ran today
-    if (lastDateKey === localDateKey) return false;
-
-    // Another worker currently running
-    if (existing.locked_until && existing.locked_until > new Date()) return false;
-
-    await prisma.cronLock.update({
-      where: { name },
-      data: {
-        locked_at: new Date(),
-        locked_until: lockedUntil,
-        meta: { dateKey: localDateKey },
-      },
-    });
-
-    return true;
-  }
-
-  await prisma.cronLock.create({
-    data: {
+  // Ensure row exists without throwing unique-violation noise.
+  await prisma.cronLock.upsert({
+    where: { name },
+    create: {
       name,
+      locked_at: new Date(0),
+      locked_until: new Date(0),
+      meta: null,
+    },
+    update: {},
+  });
+
+  // Acquire only if not already run today and lock expired.
+  const updated = await prisma.cronLock.updateMany({
+    where: {
+      name,
+      locked_until: { lt: now },
+      NOT: {
+        meta: {
+          equals: { dateKey: localDateKey },
+        },
+      },
+    },
+    data: {
       locked_at: new Date(),
       locked_until: lockedUntil,
       meta: { dateKey: localDateKey },
     },
   });
 
-  return true;
+  return updated.count === 1;
 }
 
 function getExpiredHtmlMetaKeys(meta: any, prefix: "internal" | "public"):
@@ -103,7 +100,8 @@ function getExpiredHtmlMetaKeys(meta: any, prefix: "internal" | "public"):
     prefix === "internal" ? "staticHtmlExpiresAt" : "publicHtmlExpiresAt";
 
   const url = typeof meta?.[urlKey] === "string" ? meta[urlKey] : null;
-  const expiresAtIso = typeof meta?.[expiresAtKey] === "string" ? meta[expiresAtKey] : null;
+  const expiresAtIso =
+    typeof meta?.[expiresAtKey] === "string" ? meta[expiresAtKey] : null;
 
   if (!url || !expiresAtIso) return null;
 
@@ -114,7 +112,7 @@ export async function GET() {
   const runStartedAt = new Date();
   const timeZone = process.env.TIMEZONE?.trim() || "Asia/Jerusalem";
 
-  // Decide if we should run cleanup now: local 00:00–00:59
+  // Decide if we should run cleanup now: local 00:00
   const localNow = getLocalNow(timeZone);
   const localHour = Number(localNow.toISOString().slice(11, 13));
 

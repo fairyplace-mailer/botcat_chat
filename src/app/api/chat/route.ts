@@ -119,6 +119,7 @@ export async function POST(req: Request) {
   // Attachments (best-effort)
   if (attachments.length > 0) {
     const attachmentRows = attachments.map((a) => ({
+      conversation_id: conversation.id,
       message_id: userMessageId,
       attachment_id: a.attachmentId,
       kind: a.kind,
@@ -166,21 +167,41 @@ export async function POST(req: Request) {
     take: 30,
   });
 
+  const historyAttachments = await prisma.attachment.findMany({
+    where: {
+      conversation_id: conversation.id,
+      deleted_at: null,
+      mime_type: { startsWith: "image/" },
+      blob_url_original: { not: null },
+    },
+    select: {
+      message_id: true,
+      blob_url_original: true,
+      blob_url_preview: true,
+      original_url: true,
+      mime_type: true,
+    },
+    orderBy: { created_at: "asc" },
+    take: 50,
+  });
+
+  const imagesByMessageId = new Map<
+    string,
+    Array<{ url: string; mimeType: string | null }>
+  >();
+
+  for (const a of historyAttachments) {
+    const url = a.blob_url_original ?? a.original_url;
+    if (!url) continue;
+    const arr = imagesByMessageId.get(a.message_id) ?? [];
+    arr.push({ url, mimeType: a.mime_type });
+    imagesByMessageId.set(a.message_id, arr);
+  }
+
   const extractedBlock = buildExtractedDocumentsBlock(extractedDocuments);
 
   const systemPrompt =
     "You are BotCat\u0019, a helpful FairyPlace\u0019 consultant. Answer concisely and ask clarifying questions when needed.";
-
-  const userContentParts: any[] = [];
-  userContentParts.push({ type: "text", text: `${message}${extractedBlock}` });
-
-  // Images as image_url parts
-  for (const a of attachments) {
-    if (!isImage(a)) continue;
-    const url = a.blobUrlOriginal ?? a.originalUrl;
-    if (!url) continue;
-    userContentParts.push({ type: "image_url", image_url: { url } });
-  }
 
   const extractedDocumentsChars = Array.isArray(extractedDocuments)
     ? extractedDocuments.reduce((sum: number, d: any) => {
@@ -192,15 +213,42 @@ export async function POST(req: Request) {
   const { model, reason } = chooseBotCatModel({
     message,
     extractedDocumentsChars,
-    hasImages: attachments.some(isImage),
+    hasImages: attachments.some(isImage) || historyAttachments.length > 0,
     historyMessagesCount: history.length,
   });
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
 
   for (const m of history) {
-    if (m.role === "User") messages.push({ role: "user", content: m.content_original_md });
-    if (m.role === "BotCat") messages.push({ role: "assistant", content: m.content_original_md });
+    if (m.role === "User") {
+      const imgs = imagesByMessageId.get(m.message_id) ?? [];
+      if (imgs.length === 0) {
+        messages.push({ role: "user", content: m.content_original_md });
+      } else {
+        messages.push({
+          role: "user",
+          content: [
+            { type: "text", text: m.content_original_md },
+            ...imgs.map((img) => ({ type: "image_url", image_url: { url: img.url } })),
+          ],
+        });
+      }
+    }
+
+    if (m.role === "BotCat") {
+      messages.push({ role: "assistant", content: m.content_original_md });
+    }
+  }
+
+  // Current user message with extracted docs + newly uploaded images
+  const userContentParts: any[] = [];
+  userContentParts.push({ type: "text", text: `${message}${extractedBlock}` });
+
+  for (const a of attachments) {
+    if (!isImage(a)) continue;
+    const url = a.blobUrlOriginal ?? a.originalUrl;
+    if (!url) continue;
+    userContentParts.push({ type: "image_url", image_url: { url } });
   }
 
   messages.push({ role: "user", content: userContentParts });
