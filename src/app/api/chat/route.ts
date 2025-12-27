@@ -80,7 +80,9 @@ export async function POST(req: Request) {
     where: { chat_name: chatName },
     create: {
       chat_name: chatName,
-      user_id: sessionId,
+      // IMPORTANT: sessionId is NOT a User.id. user_id is a FK to User table.
+      // Stage 1 uses anonymous sessions, so keep user_id null.
+      user_id: null,
       status: "active",
       send_to_internal: true,
       started_at: now,
