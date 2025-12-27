@@ -55,6 +55,7 @@ STATIC_BASE_URL = https://static.fairyplace.net
 2. Transcript lifecycle (important)
 
 chatName is mandatory and must be globally unique in DB.
+
 BotCat never decides when to finalize a transcript. Finalization is triggered by the orchestrator.
 When conversation ends (user left or 1h+ inactive), orchestrator triggers finalization by calling /api/bot/webhook.
 
