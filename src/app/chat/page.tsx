@@ -113,6 +113,21 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
+async function persistBotGeneratedAttachment(params: {
+  chatName: string;
+  messageId: string;
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  blobUrlOriginal: string;
+}) {
+  await fetch("/api/attachments/bot-generated", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
 export default function ChatPage() {
   const TM = "\u2122";
 
@@ -237,6 +252,7 @@ export default function ChatPage() {
       let closeChat = false;
       let consentOk: boolean | null = null;
       let botImages: BotImage[] = [];
+      let finalBotMessageId: string | null = null;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -274,9 +290,12 @@ export default function ChatPage() {
               consentOk = typeof e.data?.consentOk === "boolean" ? e.data.consentOk : null;
               botImages = Array.isArray(e.data?.botImages) ? e.data.botImages : [];
 
+              const newId = crypto.randomUUID();
+              finalBotMessageId = newId;
+
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === "bot-stream" ? { ...m, id: crypto.randomUUID(), content: reply } : m
+                  m.id === "bot-stream" ? { ...m, id: newId, content: reply } : m
                 )
               );
             }
@@ -303,8 +322,9 @@ export default function ChatPage() {
               contentType: img.mimeType,
             });
 
+            const attachmentId = crypto.randomUUID();
             uploadedAtts.push({
-              attachmentId: crypto.randomUUID(),
+              attachmentId,
               messageId: "ui-memory",
               kind: "bot_generated",
               fileName: img.fileName,
@@ -315,6 +335,22 @@ export default function ChatPage() {
               blobUrlOriginal: uploaded.url,
               blobUrlPreview: null,
             });
+
+            // Persist to DB (best-effort)
+            if (finalBotMessageId && chatName) {
+              try {
+                await persistBotGeneratedAttachment({
+                  chatName,
+                  messageId: finalBotMessageId,
+                  fileName: img.fileName,
+                  mimeType: img.mimeType,
+                  fileSizeBytes: file.size,
+                  blobUrlOriginal: uploaded.url,
+                });
+              } catch {
+                // ignore
+              }
+            }
           } catch {
             // ignore single image failure
           }
