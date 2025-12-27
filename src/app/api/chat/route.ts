@@ -236,7 +236,10 @@ export async function POST(req: Request) {
             const { finalizeConversationByChatName } = await import(
               "@/server/finalization/finalizeConversation"
             );
-            await finalizeConversationByChatName(chatName, "consent_true");
+            await finalizeConversationByChatName({
+              chatName,
+              reason: "consent_true",
+            });
 
             const reply = `${assistantText}\n\n${CONSENT_SUCCESS_TEXT}`.trim();
             controller.enqueue(enc.encode(sse("final", { reply, closeChat: true })));
