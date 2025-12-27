@@ -4,46 +4,35 @@
 
 ---
 
-## 2) BotCat behavior (Stage 1)
+## Consent-triggered finalization (addendum, Stage 1)
 
-### 2.1 Immediate finalization on user consent (MANDATORY)
+When (and only when) the user clearly and affirmatively requests to send the prepared order to FairyPlace™ designers, or agrees to BotCat’s suggestion to do so, BotCat MUST emit the exact marker:
 
-In real life the user may explicitly ask to send the prepared order to FairyPlace™ designers, or may agree to BotCat’s suggestion to do so. This must be supported.
+- `[[CONSENT_TRUE]]`
 
-**Consent signal (BotCat → orchestrator):**
-- When (and only when) the user’s intent is clear and affirmative, BotCat MUST emit the exact marker:
-  - `[[CONSENT_TRUE]]`
-- This marker is a machine-readable trigger for the orchestrator.
+This marker is a machine-readable trigger for the backend orchestrator.
 
-**Orchestrator behavior:**
-- Upon detecting `[[CONSENT_TRUE]]`, the orchestrator MUST immediately trigger finalization:
-  - call the webhook,
-  - generate all required artifacts,
-  - upload PDFs to Drive,
-  - and send the internal email.
+Orchestrator behavior:
+- Upon detecting `[[CONSENT_TRUE]]`, the orchestrator MUST immediately trigger finalization (generate artifacts and send the internal email).
 - After the internal email is successfully sent, the orchestrator MUST return `ok=true` to BotCat.
 
-**BotCat user-facing behavior:**
+BotCat user-facing behavior:
 - BotCat MUST inform the user about successful sending **only after** it receives `ok=true`.
-- If finalization fails:
-  - BotCat MUST inform the user that sending failed,
-  - MUST apologize,
-  - MUST provide contact coordinates and stop.
+- If finalization fails, BotCat MUST respond with a single, fixed error message (no retries, no speculative suggestions) and provide these contacts:
+  - Email: `fairyplace.tm@gmail.com`
+  - Website: `www.fairyplace.biz`
 
-**Failure contact coordinates (MANDATORY):**
-- Email: `fairyplace.tm@gmail.com`
-- Website: `www.fairyplace.biz`
+System messages (EN only):
+- Success: "Your order has been successfully sent to FairyPlace™ designers. The designers will contact you as soon as possible."
+- Failure: "Unfortunately, we could not forward your order to FairyPlace™ designers. However, you can contact them directly via email at fairyplace.tm@gmail.com or via the contacts on the website www.fairyplace.biz."
 
-**Strict prohibitions (MANDATORY):**
-- BotCat MUST NOT suggest:
-  - “try again later”,
-  - “repeat sending later”,
-  - “contact designers”,
-  - or any other speculative suggestions.
-
-**After a failed consent-triggered attempt:**
+After a failed consent-triggered attempt:
 - The orchestrator MUST continue operating under normal finalization triggers (user left / New Chat / 1h inactivity).
 
 ---
 
-## (rest of spec unchanged)
+# Tech_Spec_v1
+
+3.2.6. Dynamic Model Selection
+
+(See the full document history in docs/spec_initial.md. This file is intentionally concise and focuses on the operational single source of truth.)
