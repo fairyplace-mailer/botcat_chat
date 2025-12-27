@@ -86,6 +86,17 @@ async function finalizeChat(chatName: string, reason: "new_chat" | "pagehide") {
   }
 }
 
+type ConsentBanner = {
+  kind: "success" | "error";
+  text: string;
+};
+
+const CONSENT_SUCCESS_TEXT =
+  "Your order has been successfully sent to FairyPlace\u2122 designers. The designers will contact you as soon as possible.";
+
+const CONSENT_ERROR_TEXT =
+  "Unfortunately, we could not forward your order to FairyPlace\u2122 designers. However, you can contact them directly via email at fairyplace.tm@gmail.com or via the contacts on the website www.fairyplace.biz.";
+
 export default function ChatPage() {
   const TM = "\u2122";
 
@@ -93,6 +104,9 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [consentBanner, setConsentBanner] = useState<ConsentBanner | null>(null);
+  const [pendingCloseChat, setPendingCloseChat] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -116,6 +130,26 @@ export default function ChatPage() {
     window.addEventListener("pagehide", handler);
     return () => window.removeEventListener("pagehide", handler);
   }, [chatName, messages.length]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (!consentBanner) return;
+      dismissConsentBanner();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [consentBanner, pendingCloseChat]);
+
+  function dismissConsentBanner() {
+    setConsentBanner(null);
+    if (pendingCloseChat) {
+      setPendingCloseChat(false);
+      newChat();
+    }
+  }
 
   async function newChat() {
     if (chatName && messages.length > 0) {
@@ -185,6 +219,7 @@ export default function ChatPage() {
       let botText = "";
 
       let closeChat = false;
+      let consentOk: boolean | null = null;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -219,6 +254,7 @@ export default function ChatPage() {
               const reply = typeof e.data?.reply === "string" ? e.data.reply : botText;
               botText = reply;
               closeChat = e.data?.closeChat === true;
+              consentOk = typeof e.data?.consentOk === "boolean" ? e.data.consentOk : null;
 
               setMessages((prev) =>
                 prev.map((m) =>
@@ -234,10 +270,13 @@ export default function ChatPage() {
         }
       }
 
+      // Consent-driven UX: show banner and delay chat reset until user dismisses.
       if (closeChat) {
-        // After consent-triggered finalization we MUST start a new chat.
-        await new Promise((r) => setTimeout(r, 0));
-        newChat();
+        setConsentBanner({ kind: "success", text: CONSENT_SUCCESS_TEXT });
+        setPendingCloseChat(true);
+      } else if (consentOk === false) {
+        setConsentBanner({ kind: "error", text: CONSENT_ERROR_TEXT });
+        setPendingCloseChat(false);
       }
     } catch (e: any) {
       setError(e?.message || "Failed to send message");
@@ -304,6 +343,37 @@ export default function ChatPage() {
             </button>
           </div>
         </header>
+
+        {consentBanner ? (
+          <div
+            style={{
+              background: consentBanner.kind === "success" ? "rgba(16, 185, 129, 0.12)" : "rgba(176, 0, 32, 0.10)",
+              border: `1px solid ${
+                consentBanner.kind === "success" ? "rgba(16, 185, 129, 0.35)" : "rgba(176, 0, 32, 0.25)"
+              }`,
+              borderRadius: 12,
+              padding: "12px 14px",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 12,
+              color: "var(--text-primary)",
+            }}
+            role="status"
+          >
+            <div style={{ fontSize: 14, lineHeight: "18px" }}>{consentBanner.text}</div>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={dismissConsentBanner}
+              aria-label="Dismiss"
+              title="Dismiss"
+              style={{ padding: "6px 10px" }}
+            >
+              X
+            </button>
+          </div>
+        ) : null}
 
         {error ? (
           <div style={{ color: "#b00020", fontSize: 14 }}>Error: {error}</div>
