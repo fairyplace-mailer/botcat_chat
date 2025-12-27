@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import ChatWindow, { type Message as UIMessage } from "@/components/chat/ChatWindow";
 import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
@@ -72,6 +72,20 @@ function toChatWindowMessage(m: ChatMessage): UIMessage {
   };
 }
 
+async function finalizeChat(chatName: string, reason: "new_chat" | "pagehide") {
+  try {
+    await fetch("/api/conversations/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatName, reason }),
+      // allow sending during navigation
+      keepalive: reason === "pagehide",
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 export default function ChatPage() {
   const TM = "\u2122";
 
@@ -84,7 +98,31 @@ export default function ChatPage() {
 
   const canReset = useMemo(() => messages.length > 0 || chatName, [messages, chatName]);
 
-  function newChat() {
+  useEffect(() => {
+    const handler = () => {
+      if (!chatName) return;
+      if (messages.length === 0) return;
+
+      // Prefer sendBeacon; fallback to fetch keepalive.
+      try {
+        const payload = JSON.stringify({ chatName, reason: "pagehide" });
+        const ok = navigator.sendBeacon("/api/conversations/close", payload);
+        if (!ok) finalizeChat(chatName, "pagehide");
+      } catch {
+        finalizeChat(chatName, "pagehide");
+      }
+    };
+
+    window.addEventListener("pagehide", handler);
+    return () => window.removeEventListener("pagehide", handler);
+  }, [chatName, messages.length]);
+
+  async function newChat() {
+    if (chatName && messages.length > 0) {
+      // best-effort: finalize current conversation
+      finalizeChat(chatName, "new_chat");
+    }
+
     setChatName(null);
     setMessages([]);
     setError(null);
@@ -146,6 +184,8 @@ export default function ChatPage() {
       let buffer = "";
       let botText = "";
 
+      let closeChat = false;
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -178,6 +218,8 @@ export default function ChatPage() {
             if (e.event === "final") {
               const reply = typeof e.data?.reply === "string" ? e.data.reply : botText;
               botText = reply;
+              closeChat = e.data?.closeChat === true;
+
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === "bot-stream" ? { ...m, id: crypto.randomUUID(), content: reply } : m
@@ -190,6 +232,12 @@ export default function ChatPage() {
             }
           }
         }
+      }
+
+      if (closeChat) {
+        // After consent-triggered finalization we MUST start a new chat.
+        await new Promise((r) => setTimeout(r, 0));
+        newChat();
       }
     } catch (e: any) {
       setError(e?.message || "Failed to send message");

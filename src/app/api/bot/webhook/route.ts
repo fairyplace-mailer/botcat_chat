@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { put } from "@vercel/blob";
 import { prisma } from "@/server/db";
 import {
   mapBotCatAttachmentsArrayToDb,
   BotCatAttachmentJson,
 } from "@/server/attachments/blob-mapper";
-import { buildFinalJsonByChatName } from "@/lib/botcat-final-json";
-import { buildTranscriptHtml } from "@/lib/transcript-html";
-import { buildPdfFromHtml } from "@/lib/transcript-pdf";
-import { uploadPdfToDrive } from "@/lib/google/drive";
-import { sendTranscriptEmail } from "@/lib/email-sender";
-import { generateWebpPreviewFromBlobUrl } from "@/server/attachments/preview";
+import { finalizeConversationByChatName } from "@/server/finalization/finalizeConversation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,81 +80,6 @@ function parseIsoDate(value: string, fieldName: string): Date {
   return d;
 }
 
-function addDays(base: Date, days: number): Date {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return new Date(base.getTime() + days * msPerDay);
-}
-
-type ConversationMeta = {
-  staticHtmlBlobUrl?: string;
-  staticHtmlExpiresAt?: string;
-  internalPdfDriveFileId?: string;
-  publicHtmlBlobUrl?: string;
-  publicHtmlExpiresAt?: string;
-  publicPdfDriveFileId?: string;
-};
-
-function buildTranslatedMap(translatedMessages: BotCatTranslatedMessageJson[]) {
-  const map = new Map<string, BotCatTranslatedMessageJson>();
-  for (const tm of translatedMessages ?? []) {
-    if (tm && typeof tm.messageId === "string" && tm.messageId.trim()) {
-      map.set(tm.messageId, tm);
-    }
-  }
-  return map;
-}
-
-async function ensureImagePreviews(params: {
-  conversationId: string;
-  receivedAt: Date;
-}) {
-  const attachments = await prisma.attachment.findMany({
-    where: {
-      conversation_id: params.conversationId,
-      mime_type: { startsWith: "image/" },
-      deleted_at: null,
-    },
-    select: {
-      id: true,
-      blob_url_original: true,
-      blob_url_preview: true,
-    },
-  });
-
-  const toGenerate = attachments.filter(
-    (a: { blob_url_original: string | null; blob_url_preview: string | null }) =>
-      !!a.blob_url_original && !a.blob_url_preview
-  );
-
-  for (const att of toGenerate) {
-    const originalUrl = att.blob_url_original;
-    if (!originalUrl) continue;
-
-    const preview = await generateWebpPreviewFromBlobUrl({
-      blobUrlOriginal: originalUrl,
-    });
-
-    const previewBlob = await put(
-      `previews/${params.conversationId}/${att.id}.webp`,
-      preview.buffer,
-      {
-        access: "public",
-        contentType: preview.contentType,
-        addRandomSuffix: true,
-      }
-    );
-
-    await prisma.attachment.update({
-      where: { id: att.id },
-      data: {
-        blob_url_preview: previewBlob.url,
-        // previews follow the same retention as originals
-        expires_at: addDays(params.receivedAt, 30),
-      },
-    });
-  }
-}
-
 function normalizeLanguageOriginal(payload: BotCatFinalJsonIncoming): string {
   const lang =
     (typeof payload.languageOriginal === "string" && payload.languageOriginal) ||
@@ -190,6 +109,16 @@ function normalizeMessageContent(msg: BotCatMessageJson): string {
 
 function isValidationError(e: unknown): e is ValidationError {
   return e instanceof ValidationError;
+}
+
+function buildTranslatedMap(translatedMessages: BotCatTranslatedMessageJson[]) {
+  const map = new Map<string, BotCatTranslatedMessageJson>();
+  for (const tm of translatedMessages ?? []) {
+    if (tm && typeof tm.messageId === "string" && tm.messageId.trim()) {
+      map.set(tm.messageId, tm);
+    }
+  }
+  return map;
 }
 
 export async function POST(req: NextRequest) {
@@ -250,6 +179,7 @@ export async function POST(req: NextRequest) {
       "messages[last].createdAt"
     );
 
+    // upsert conversation (webhook is a finalization channel, hence `closed`)
     const conversation = await prisma.conversation.upsert({
       where: {
         chat_name: payload.chatName,
@@ -318,114 +248,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Mandatory: generate image previews for transcript artifacts
-    await ensureImagePreviews({
-      conversationId: conversation.id,
-      receivedAt,
-    });
-
-    /**
-     * [post-processing]
-     */
+    // shared finalization pipeline (HTML/PDF/Drive/email)
     try {
-      const finalJson = await buildFinalJsonByChatName(payload.chatName);
-
-      // 1) Generate HTML transcripts and publish to Blob
-      const htmlInternal = buildTranscriptHtml(finalJson, "internal");
-      const htmlPublic = buildTranscriptHtml(finalJson, "public");
-
-      const [internalBlob, publicBlob] = await Promise.all([
-        put(`transcripts/internal/${finalJson.chatName}.html`, htmlInternal, {
-          access: "public",
-          contentType: "text/html; charset=utf-8",
-          addRandomSuffix: true,
-        }),
-        put(`transcripts/public/${finalJson.chatName}.html`, htmlPublic, {
-          access: "public",
-          contentType: "text/html; charset=utf-8",
-          addRandomSuffix: true,
-        }),
-      ]);
-
-      // 2) Generate PDFs from HTML (Drive only)
-      const [internalPdfBytes, publicPdfBytes] = await Promise.all([
-        buildPdfFromHtml(htmlInternal),
-        buildPdfFromHtml(htmlPublic),
-      ]);
-
-      const [internalDriveResult, publicDriveResult] = await Promise.all([
-        uploadPdfToDrive({
-          fileName: `${payload.chatName}.pdf`,
-          pdfBuffer: Buffer.from(internalPdfBytes),
-        }),
-        uploadPdfToDrive({
-          fileName: `${payload.chatName}.public.pdf`,
-          pdfBuffer: Buffer.from(publicPdfBytes),
-        }),
-      ]);
-
-      // Persist published URLs into Conversation.meta
-      const prevMeta = (conversation.meta ?? {}) as ConversationMeta;
-      const expiresAtIso = addDays(receivedAt, 30).toISOString();
-
-      const nextMeta: ConversationMeta = {
-        ...prevMeta,
-        staticHtmlBlobUrl: internalBlob.url,
-        staticHtmlExpiresAt: expiresAtIso,
-        internalPdfDriveFileId: internalDriveResult.fileId,
-        publicHtmlBlobUrl: publicBlob.url,
-        publicHtmlExpiresAt: expiresAtIso,
-        publicPdfDriveFileId: publicDriveResult.fileId,
-      };
-
-      await prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { meta: nextMeta as any },
+      await finalizeConversationByChatName({
+        chatName: payload.chatName,
+        reason: "webhook",
       });
-
-      if (finalJson.sendToInternal) {
-        const internalTo =
-          process.env.MAIL_TO_INTERNAL?.trim() || "fairyplace.tm@gmail.com";
-
-        try {
-          const sendResult = await sendTranscriptEmail({
-            to: internalTo,
-            finalJson,
-          });
-
-          await prisma.emailLog.create({
-            data: {
-              conversation_id: conversation.id,
-              recipient_email: internalTo,
-              subject: `BotCat Transcript: ${finalJson.chatName}`,
-              status: "sent",
-              provider_message_id: sendResult.id,
-              error_message: null,
-            },
-          });
-        } catch (sendError: any) {
-          const msg =
-            sendError instanceof Error
-              ? sendError.message
-              : typeof sendError === "string"
-              ? sendError
-              : "Unknown send error";
-
-          await prisma.emailLog.create({
-            data: {
-              conversation_id: conversation.id,
-              recipient_email: internalTo,
-              subject: `BotCat Transcript: ${finalJson.chatName}`,
-              status: "failed",
-              provider_message_id: null,
-              error_message: msg,
-            },
-          });
-        }
-      }
     } catch (postProcessError: any) {
       throw new Error(
-        `Post-processing failed (Blob/PDF/Drive/EmailLog/Resend): ${
+        `Post-processing failed: ${
           postProcessError?.message ?? String(postProcessError)
         }`
       );

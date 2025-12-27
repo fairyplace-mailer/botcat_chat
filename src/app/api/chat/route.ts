@@ -10,13 +10,10 @@ import { BOTCAT_CHAT_PROMPT } from "@/lib/botcat-chat-prompt";
 
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
 import { generateChatName, generateMessageId } from "@/lib/chat-ids";
-import {
-  openai,
-  selectBotCatEmbeddingModel,
-  selectBotCatTextModel,
-  type BotCatTextModelKind,
-} from "@/lib/openai";
+import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
+import { chooseBotCatModel } from "@/lib/model-router";
 import { mapBotCatAttachmentsArrayToDb } from "@/server/attachments/blob-mapper";
+import { finalizeConversationByChatName } from "@/server/finalization/finalizeConversation";
 
 function sha256HexShort(input: string): string {
   return crypto.createHash("sha256").update(input).digest("hex").slice(0, 32);
@@ -81,20 +78,17 @@ type HistoryItem = {
   sequence: number;
 };
 
-function toOpenAIInputFromAttachment(a: BotCatAttachment) {
+function toOpenAIChatImagePartFromAttachment(a: BotCatAttachment) {
   const url = a.blobUrlOriginal ?? a.originalUrl;
   if (!url) return null;
 
   const mime = a.mimeType ?? "";
-  if (mime.startsWith("image/")) {
-    return {
-      type: "input_image" as const,
-      image_url: url,
-    };
-  }
+  if (!mime.startsWith("image/")) return null;
 
-  // IMPORTANT (per docs/spec.md): non-image files are NOT passed to LLM by URL.
-  return null;
+  return {
+    type: "image_url" as const,
+    image_url: { url },
+  };
 }
 
 function formatExtractedDocuments(docs: ExtractedDocument[]): string {
@@ -117,16 +111,6 @@ function formatExtractedDocuments(docs: ExtractedDocument[]): string {
     .join("\n\n");
 }
 
-function toExtractedDocumentsMeta(docs: ExtractedDocument[]) {
-  return docs.map((d) => ({
-    attachmentId: d.attachmentId,
-    fileName: d.fileName,
-    mimeType: d.mimeType,
-    textChars: d.text.length,
-    trimmed: d.text.includes("[TRIMMED]"),
-  }));
-}
-
 function sseHeaders() {
   return {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -137,33 +121,6 @@ function sseHeaders() {
 
 function sseEvent(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
-
-function chooseTextModelKind(params: {
-  message: string;
-  extractedDocuments: ExtractedDocument[];
-  attachments: BotCatAttachment[];
-}): BotCatTextModelKind {
-  const { message, extractedDocuments, attachments } = params;
-
-  const len = message.length;
-  const hasDocsText = extractedDocuments.some((d) => d.text && d.text.length > 0);
-  const hasImages = attachments.some((a) => (a.mimeType ?? "").startsWith("image/"));
-
-  const lower = message.toLowerCase();
-  const reasoningHints = [
-    "step by step",
-    "reasoning",
-    "prove",
-    "\u043e\u0431\u043e\u0441\u043d\u0443\u0439",
-    "\u043f\u043e\u0448\u0430\u0433\u043e\u0432\u043e",
-  ];
-
-  if (len > 2000 || reasoningHints.some((k) => lower.includes(k))) return "reasoning";
-
-  if (len > 800 || hasDocsText || hasImages) return "chat_strong";
-
-  return "chat";
 }
 
 async function createEmbeddingForUserMessage(params: {
@@ -187,6 +144,20 @@ async function createEmbeddingForUserMessage(params: {
       dims: vec.length,
     },
   });
+}
+
+const CONSENT_TRUE_MARKER = "[[CONSENT_TRUE]]";
+
+const CONSENT_SUCCESS_MESSAGE_EN =
+  "Your order has been successfully sent to FairyPlace™ designers. The designers will contact you as soon as possible.";
+
+const CONSENT_FAILURE_MESSAGE_EN =
+  "Unfortunately, we could not forward your order to FairyPlace™ designers. However, you can contact them directly via email at fairyplace.tm@gmail.com or via the contacts on the website www.fairyplace.biz.";
+
+function stripConsentMarker(text: string): { text: string; hadMarker: boolean } {
+  if (!text.includes(CONSENT_TRUE_MARKER)) return { text, hadMarker: false };
+  const cleaned = text.split(CONSENT_TRUE_MARKER).join("").trim();
+  return { text: cleaned, hadMarker: true };
 }
 
 export async function POST(request: Request) {
@@ -268,9 +239,6 @@ export async function POST(request: Request) {
           is_voice: false,
           created_at: now,
           sequence: userSeq,
-          meta: {
-            extractedDocuments: toExtractedDocumentsMeta(body.extractedDocuments ?? []),
-          },
         },
       });
 
@@ -344,36 +312,61 @@ export async function POST(request: Request) {
 
   const historyAsc = (history.slice().reverse() as unknown as HistoryItem[]);
 
-  const textModelKind = chooseTextModelKind({
+  const hasImages = (body.attachments ?? []).some((a) =>
+    (a.mimeType ?? "").startsWith("image/")
+  );
+  const extractedDocumentsChars = (body.extractedDocuments ?? []).reduce(
+    (sum, d) => sum + d.text.length,
+    0
+  );
+
+  const modelChoice = chooseBotCatModel({
     message: body.message,
-    extractedDocuments: body.extractedDocuments ?? [],
-    attachments: body.attachments as any,
+    extractedDocumentsChars,
+    hasImages,
+    historyMessagesCount: historyAsc.length,
   });
-  const model = selectBotCatTextModel(textModelKind);
 
   const extractedDocsForLLM = extractedTextBlock ? `\n\n${extractedTextBlock}` : "";
 
-  const inputs: any[] = [
-    { type: "input_text" as const, text: BOTCAT_CHAT_PROMPT },
+  const systemMessage = {
+    role: "system" as const,
+    content: BOTCAT_CHAT_PROMPT,
+  };
 
-    ...historyAsc.map((m: HistoryItem) => ({
-      type: "input_text" as const,
-      text: `${m.role}:\n${m.content_original_md}`,
-    })),
+  const historyMessages = historyAsc.map((m) => ({
+    role: m.role === "BotCat" ? ("assistant" as const) : ("user" as const),
+    content: `${m.content_original_md}`,
+  }));
 
+  const currentUserContent: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [
     {
-      type: "input_text" as const,
+      type: "text",
       text: `${body.message}${extractedDocsForLLM}`,
     },
-
-    ...((body.attachments ?? [])
-      .map((a) => toOpenAIInputFromAttachment(a as any))
-      .filter(Boolean)),
   ];
 
-  const stream = await openai.responses.stream({
-    model,
-    input: inputs,
+  // IMPORTANT (per docs/spec.md): non-image files are NOT passed to LLM by URL.
+  // Only images are passed as image_url parts.
+  for (const a of body.attachments ?? []) {
+    const part = toOpenAIChatImagePartFromAttachment(a as any);
+    if (part) currentUserContent.push(part);
+  }
+
+  const stream = await openai.chat.completions.create({
+    model: modelChoice.model,
+    stream: true,
+    messages: [
+      systemMessage,
+      ...historyMessages,
+      {
+        role: "user",
+        content: currentUserContent,
+      },
+    ],
   });
 
   const encoder = new TextEncoder();
@@ -384,8 +377,9 @@ export async function POST(request: Request) {
         encoder.encode(
           sseEvent("meta", {
             chatName,
-            model,
-            mode: textModelKind,
+            model: modelChoice.model,
+            mode: modelChoice.kind,
+            modelReason: modelChoice.reason,
             userMessageId,
             userSequence,
             usedHistoryCount: historyAsc.length,
@@ -403,13 +397,17 @@ export async function POST(request: Request) {
       let fullText = "";
 
       try {
-        for await (const event of stream) {
-          if ((event as any).type === "response.output_text.delta") {
-            const delta = (event as any).delta as string;
+        for await (const chunk of stream) {
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (typeof delta === "string" && delta.length > 0) {
             fullText += delta;
             controller.enqueue(encoder.encode(sseEvent("delta", { delta })));
           }
         }
+
+        // Detect and strip consent marker from assistant content.
+        const consent = stripConsentMarker(fullText);
+        fullText = consent.text;
 
         await prisma.message.create({
           data: {
@@ -426,12 +424,37 @@ export async function POST(request: Request) {
           },
         });
 
+        let closeChat = false;
+        let appendedSystemMessage: string | null = null;
+
+        if (consent.hadMarker) {
+          try {
+            const fin = await finalizeConversationByChatName({
+              chatName,
+              reason: "consent_true",
+            });
+            if (fin.ok) {
+              appendedSystemMessage = CONSENT_SUCCESS_MESSAGE_EN;
+              closeChat = true;
+            } else {
+              appendedSystemMessage = CONSENT_FAILURE_MESSAGE_EN;
+            }
+          } catch {
+            appendedSystemMessage = CONSENT_FAILURE_MESSAGE_EN;
+          }
+        }
+
         controller.enqueue(
           encoder.encode(
             sseEvent("final", {
               chatName,
-              reply: fullText,
+              reply: appendedSystemMessage
+                ? `${fullText}\n\n${appendedSystemMessage}`
+                : fullText,
               botMessageId,
+              closeChat,
+              consentTriggered: consent.hadMarker,
+              consentOk: consent.hadMarker ? closeChat : null,
             })
           )
         );
