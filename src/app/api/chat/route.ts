@@ -167,7 +167,7 @@ export async function POST(req: Request) {
   const extractedBlock = buildExtractedDocumentsBlock(extractedDocuments);
 
   const systemPrompt =
-    "You are BotCat, a helpful FairyPlace consultant. Answer concisely and ask clarifying questions when needed.";
+    "You are BotCat\u0019, a helpful FairyPlace\u0019 consultant. Answer concisely and ask clarifying questions when needed.";
 
   const userContentParts: any[] = [];
   userContentParts.push({ type: "text", text: `${message}${extractedBlock}` });
@@ -180,11 +180,18 @@ export async function POST(req: Request) {
     userContentParts.push({ type: "image_url", image_url: { url } });
   }
 
+  const extractedDocumentsChars = Array.isArray(extractedDocuments)
+    ? extractedDocuments.reduce((sum: number, d: any) => {
+        const t = typeof d?.text === "string" ? d.text : "";
+        return sum + t.length;
+      }, 0)
+    : 0;
+
   const { model, reason } = chooseBotCatModel({
-    userMessage: message,
-    extractedDocuments,
+    message,
+    extractedDocumentsChars,
     hasImages: attachments.some(isImage),
-    historyCount: history.length,
+    historyMessagesCount: history.length,
   });
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
@@ -245,7 +252,7 @@ export async function POST(req: Request) {
           }
         }
 
-        controller.enqueue(enc.encode(sse("final", { reply: assistantText }))); 
+        controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
         controller.close();
       } catch (e: any) {
         controller.enqueue(enc.encode(sse("error", { error: e?.message || "Stream error" })));
