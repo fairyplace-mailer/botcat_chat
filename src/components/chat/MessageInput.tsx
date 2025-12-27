@@ -132,9 +132,9 @@ export function MessageInput(props: MessageInputProps) {
     const borderTop = parseFloat(style.borderTopWidth) || 0;
     const borderBottom = parseFloat(style.borderBottomWidth) || 0;
 
-    // 6 lines max like in botcow
+    // 12 lines max (Stage 1 requirement)
     return Math.round(
-      lineHeight * 6 + paddingTop + paddingBottom + borderTop + borderBottom,
+      lineHeight * 12 + paddingTop + paddingBottom + borderTop + borderBottom,
     );
   }
 
@@ -252,7 +252,7 @@ export function MessageInput(props: MessageInputProps) {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // BotCow behaviour: Enter = send, Shift+Enter = newline
+    // Enter = send, Shift+Enter = newline
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       onSendClick();
@@ -287,7 +287,7 @@ export function MessageInput(props: MessageInputProps) {
       const name = d.fileName ?? "document";
       const trimmed = wasTrimmed(d.text);
       const chars = d.text.length;
-      return `${name} — ${chars} chars${trimmed ? " (trimmed)" : ""}`;
+      return `${name}  ${chars} chars${trimmed ? " (trimmed)" : ""}`;
     });
 
     return docs.join("; ");
@@ -298,25 +298,42 @@ export function MessageInput(props: MessageInputProps) {
       {/* Attachments chips */}
       {attachments.length > 0 ? (
         <div className="message-input_attachments">
-          {attachments.map((att, idx) => (
-            <div className="message-input_attachment" key={att.attachmentId}>
-              <a
-                href={att.blobUrlOriginal ?? att.originalUrl ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {att.fileName || "attachment"}
-              </a>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => removeAttachment(idx)}
-                disabled={isBusy}
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+          {attachments.map((att, idx) => {
+            const href = att.blobUrlOriginal ?? att.originalUrl ?? undefined;
+            const isImage = Boolean(att.mimeType && att.mimeType.startsWith("image/"));
+
+            return (
+              <div className="message-input_attachment" key={att.attachmentId}>
+                {isImage && href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="message-input_attachmentImage"
+                  >
+                    <img
+                      src={href}
+                      alt={att.fileName || "image"}
+                      loading="lazy"
+                    />
+                  </a>
+                ) : null}
+
+                <a href={href} target="_blank" rel="noreferrer">
+                  {att.fileName || "attachment"}
+                </a>
+
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => removeAttachment(idx)}
+                  disabled={isBusy}
+                >
+                  Remove
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
@@ -331,9 +348,7 @@ export function MessageInput(props: MessageInputProps) {
       ) : null}
 
       {extractedSummary ? (
-        <div className="message-input_uploading">
-          Extracted: {extractedSummary}
-        </div>
+        <div className="message-input_uploading">Extracted: {extractedSummary}</div>
       ) : null}
 
       {error ? <div className="message-input_error">{error}</div> : null}
@@ -356,6 +371,7 @@ export function MessageInput(props: MessageInputProps) {
           disabled={isBusy}
           aria-label="Attach files"
           title="Attach files"
+          style={{ fontSize: "36px", lineHeight: 1 }}
         >
           +
         </button>
