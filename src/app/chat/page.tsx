@@ -146,7 +146,6 @@ export default function ChatPage() {
   useEffect(() => {
     const handler = () => {
       if (!chatName) return;
-      if (messages.length === 0) return;
 
       // Prefer sendBeacon; fallback to fetch keepalive.
       try {
@@ -160,7 +159,7 @@ export default function ChatPage() {
 
     window.addEventListener("pagehide", handler);
     return () => window.removeEventListener("pagehide", handler);
-  }, [chatName, messages.length]);
+  }, [chatName]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
