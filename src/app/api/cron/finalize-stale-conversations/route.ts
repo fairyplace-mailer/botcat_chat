@@ -13,19 +13,25 @@ async function acquireLock(name: string, ttlMinutes: number) {
   const now = new Date();
   const lockedUntil = addMinutes(now, ttlMinutes);
 
-  try {
-    await prisma.cronLock.create({
-      data: { name, locked_at: now, locked_until: lockedUntil },
-    });
-    return true;
-  } catch {
-    // may already exist
+  // Make lock acquisition atomic (no create+race).
+  // If another worker already created it, we handle it below.
+  const existing = await prisma.cronLock.findUnique({ where: { name } });
+
+  if (!existing) {
+    try {
+      await prisma.cronLock.create({
+        data: { name, locked_at: now, locked_until: lockedUntil },
+      });
+      return true;
+    } catch {
+      // someone else created it in between
+    }
   }
 
-  const existing = await prisma.cronLock.findUnique({ where: { name } });
-  if (!existing) return false;
+  const current = await prisma.cronLock.findUnique({ where: { name } });
+  if (!current) return false;
 
-  if (existing.locked_until < now) {
+  if (current.locked_until < now) {
     await prisma.cronLock.update({
       where: { name },
       data: { locked_at: now, locked_until: lockedUntil },
