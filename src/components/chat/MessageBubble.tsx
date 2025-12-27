@@ -9,34 +9,46 @@ interface MessageBubbleProps {
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ author, text, attachments }) => {
   return (
-    <div className={`message-bubble message-bubble-${author}`.toLowerCase()}>
-      <div className="message-text">{text}</div>
+    <div className={`message-bubble message-bubble-${author}`}>
+      <div className="message-text" style={{ textAlign: "left", direction: "ltr" }}>
+        {text}
+      </div>
+
       {attachments && attachments.length > 0 && (
         <div className="attachments-list">
           {attachments.map((att) => {
+            const key = att.attachmentId;
+
+            const href = att.blobUrlOriginal ?? att.originalUrl ?? undefined;
+
             if (att.mimeType?.startsWith("image/")) {
-              return att.blobUrlPreview ? (
-                <a
-                  key={att.attachmentId}
-                  href={att.blobUrlOriginal ?? att.originalUrl ?? undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img src={att.blobUrlPreview ?? undefined} alt="attachment preview" />
-                </a>
-              ) : null;
-            } else {
+              const src = att.blobUrlPreview ?? att.blobUrlOriginal ?? att.originalUrl ?? null;
+              if (!src) return null;
+
               return (
                 <a
-                  key={att.attachmentId}
-                  href={att.blobUrlOriginal ?? att.originalUrl ?? undefined}
+                  key={key}
+                  href={href}
                   target="_blank"
                   rel="noopener noreferrer"
+                  className="attachment-image"
                 >
-                  {att.fileName ?? "Файл"}
+                  <img src={src} alt={att.fileName ?? "attachment preview"} loading="lazy" />
                 </a>
               );
             }
+
+            return (
+              <a
+                key={key}
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="attachment-file"
+              >
+                {att.fileName ?? "File"}
+              </a>
+            );
           })}
         </div>
       )}
