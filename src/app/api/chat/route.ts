@@ -68,9 +68,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Empty message" }, { status: 400 });
   }
 
-  const userAgent = typeof body?.client?.userAgent === "string" ? body.client.userAgent : null;
-  const sessionId = typeof body?.client?.sessionId === "string" ? body.client.sessionId : null;
-
   const now = new Date();
 
   // Create/ensure conversation
@@ -121,16 +118,17 @@ export async function POST(req: Request) {
     const attachmentRows = attachments.map((a) => ({
       conversation_id: conversation.id,
       message_id: userMessageId,
-      attachment_id: a.attachmentId,
       kind: a.kind,
       file_name: a.fileName ?? null,
       mime_type: a.mimeType ?? null,
       file_size_bytes: a.fileSizeBytes ?? null,
       page_count: a.pageCount ?? null,
-      original_url: a.originalUrl ?? null,
+      // Attachment model uses external_url, not original_url
+      external_url: a.originalUrl ?? null,
       blob_url_original: a.blobUrlOriginal ?? null,
       blob_url_preview: a.blobUrlPreview ?? null,
       expires_at: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      deleted_at: null,
     }));
 
     try {
@@ -140,20 +138,25 @@ export async function POST(req: Request) {
     }
   }
 
-  // Embedding best-effort
+  // Embedding best-effort (Prisma schema expects vector+dims)
   try {
     const embeddingModel = selectBotCatEmbeddingModel();
     const emb = await openai.embeddings.create({ model: embeddingModel, input: message });
     const vec = emb.data?.[0]?.embedding;
-    if (vec && Array.isArray(vec)) {
+    if (vec && Array.isArray(vec) && vec.length > 0) {
       await prisma.messageEmbedding.upsert({
         where: { message_id: userMessageId },
         create: {
           message_id: userMessageId,
           model: embeddingModel,
-          embedding: vec as any,
+          vector: vec as any,
+          dims: vec.length,
         },
-        update: { model: embeddingModel, embedding: vec as any },
+        update: {
+          model: embeddingModel,
+          vector: vec as any,
+          dims: vec.length,
+        },
       });
     }
   } catch {
@@ -178,20 +181,17 @@ export async function POST(req: Request) {
       message_id: true,
       blob_url_original: true,
       blob_url_preview: true,
-      original_url: true,
+      external_url: true,
       mime_type: true,
     },
     orderBy: { created_at: "asc" },
     take: 50,
   });
 
-  const imagesByMessageId = new Map<
-    string,
-    Array<{ url: string; mimeType: string | null }>
-  >();
+  const imagesByMessageId = new Map<string, Array<{ url: string; mimeType: string | null }>>();
 
   for (const a of historyAttachments) {
-    const url = a.blob_url_original ?? a.original_url;
+    const url = a.blob_url_original ?? a.external_url;
     if (!url) continue;
     const arr = imagesByMessageId.get(a.message_id) ?? [];
     arr.push({ url, mimeType: a.mime_type });
@@ -201,7 +201,7 @@ export async function POST(req: Request) {
   const extractedBlock = buildExtractedDocumentsBlock(extractedDocuments);
 
   const systemPrompt =
-    "You are BotCat\u0019, a helpful FairyPlace\u0019 consultant. Answer concisely and ask clarifying questions when needed.";
+    "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.";
 
   const extractedDocumentsChars = Array.isArray(extractedDocuments)
     ? extractedDocuments.reduce((sum: number, d: any) => {
@@ -282,7 +282,6 @@ export async function POST(req: Request) {
           assistantText = assistantText.split(CONSENT_MARKER).join("").trimEnd();
 
           try {
-            // finalize immediately
             const { finalizeConversationByChatName } = await import(
               "@/server/finalization/finalizeConversation"
             );
