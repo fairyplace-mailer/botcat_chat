@@ -5,6 +5,7 @@ import Link from "next/link";
 import ChatWindow, { type Message as UIMessage } from "@/components/chat/ChatWindow";
 import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
+import { upload } from "@vercel/blob/client";
 
 export type ChatMessage = {
   id: string;
@@ -96,6 +97,21 @@ const CONSENT_SUCCESS_TEXT =
 
 const CONSENT_ERROR_TEXT =
   "Unfortunately, we could not forward your order to FairyPlace\u2122 designers. However, you can contact them directly via email at fairyplace.tm@gmail.com or via the contacts on the website www.fairyplace.biz.";
+
+type BotImage = {
+  mimeType: "image/png";
+  base64: string;
+  fileName: string;
+};
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const cleaned = base64.replace(/^data:[^;]+;base64,/i, "").replace(/\s+/g, "");
+  const binary = atob(cleaned);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
 
 export default function ChatPage() {
   const TM = "\u2122";
@@ -220,6 +236,7 @@ export default function ChatPage() {
 
       let closeChat = false;
       let consentOk: boolean | null = null;
+      let botImages: BotImage[] = [];
 
       while (true) {
         const { value, done } = await reader.read();
@@ -255,6 +272,7 @@ export default function ChatPage() {
               botText = reply;
               closeChat = e.data?.closeChat === true;
               consentOk = typeof e.data?.consentOk === "boolean" ? e.data.consentOk : null;
+              botImages = Array.isArray(e.data?.botImages) ? e.data.botImages : [];
 
               setMessages((prev) =>
                 prev.map((m) =>
@@ -267,6 +285,53 @@ export default function ChatPage() {
               throw new Error(e.data?.error || "Stream error");
             }
           }
+        }
+      }
+
+      // If bot returned images, upload them to Blob and append to last bot message.
+      if (botImages.length > 0) {
+        const uploadedAtts: BotCatAttachment[] = [];
+
+        for (const img of botImages) {
+          try {
+            const blob = base64ToBlob(img.base64, img.mimeType);
+            const file = new File([blob], img.fileName, { type: img.mimeType });
+
+            const uploaded = await upload(img.fileName, file, {
+              access: "public",
+              handleUploadUrl: "/api/blob/upload",
+              contentType: img.mimeType,
+            });
+
+            uploadedAtts.push({
+              attachmentId: crypto.randomUUID(),
+              messageId: "ui-memory",
+              kind: "bot_generated",
+              fileName: img.fileName,
+              mimeType: img.mimeType,
+              fileSizeBytes: file.size,
+              pageCount: null,
+              originalUrl: uploaded.url,
+              blobUrlOriginal: uploaded.url,
+              blobUrlPreview: null,
+            });
+          } catch {
+            // ignore single image failure
+          }
+        }
+
+        if (uploadedAtts.length > 0) {
+          setMessages((prev) => {
+            const next = [...prev];
+            for (let i = next.length - 1; i >= 0; i -= 1) {
+              if (next[i].role === "BotCat") {
+                const existing = next[i].attachments ?? [];
+                next[i] = { ...next[i], attachments: [...existing, ...uploadedAtts] };
+                break;
+              }
+            }
+            return next;
+          });
         }
       }
 
