@@ -13,6 +13,7 @@ import { generateChatName, generateMessageId } from "@/lib/chat-ids";
 import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
 import { chooseBotCatModel } from "@/lib/model-router";
 import { mapBotCatAttachmentsArrayToDb } from "@/server/attachments/blob-mapper";
+import { finalizeConversationByChatName } from "@/server/finalization/finalizeConversation";
 
 function sha256HexShort(input: string): string {
   return crypto.createHash("sha256").update(input).digest("hex").slice(0, 32);
@@ -143,6 +144,20 @@ async function createEmbeddingForUserMessage(params: {
       dims: vec.length,
     },
   });
+}
+
+const CONSENT_TRUE_MARKER = "[[CONSENT_TRUE]]";
+
+const CONSENT_SUCCESS_MESSAGE_EN =
+  "Your order has been successfully sent to FairyPlace™ designers. The designers will contact you as soon as possible.";
+
+const CONSENT_FAILURE_MESSAGE_EN =
+  "Unfortunately, we could not forward your order to FairyPlace™ designers. However, you can contact them directly via email at fairyplace.tm@gmail.com or via the contacts on the website www.fairyplace.biz.";
+
+function stripConsentMarker(text: string): { text: string; hadMarker: boolean } {
+  if (!text.includes(CONSENT_TRUE_MARKER)) return { text, hadMarker: false };
+  const cleaned = text.split(CONSENT_TRUE_MARKER).join("").trim();
+  return { text: cleaned, hadMarker: true };
 }
 
 export async function POST(request: Request) {
@@ -390,6 +405,10 @@ export async function POST(request: Request) {
           }
         }
 
+        // Detect and strip consent marker from assistant content.
+        const consent = stripConsentMarker(fullText);
+        fullText = consent.text;
+
         await prisma.message.create({
           data: {
             conversation_id: conversationId,
@@ -405,12 +424,37 @@ export async function POST(request: Request) {
           },
         });
 
+        let closeChat = false;
+        let appendedSystemMessage: string | null = null;
+
+        if (consent.hadMarker) {
+          try {
+            const fin = await finalizeConversationByChatName({
+              chatName,
+              reason: "consent_true",
+            });
+            if (fin.ok) {
+              appendedSystemMessage = CONSENT_SUCCESS_MESSAGE_EN;
+              closeChat = true;
+            } else {
+              appendedSystemMessage = CONSENT_FAILURE_MESSAGE_EN;
+            }
+          } catch {
+            appendedSystemMessage = CONSENT_FAILURE_MESSAGE_EN;
+          }
+        }
+
         controller.enqueue(
           encoder.encode(
             sseEvent("final", {
               chatName,
-              reply: fullText,
+              reply: appendedSystemMessage
+                ? `${fullText}\n\n${appendedSystemMessage}`
+                : fullText,
               botMessageId,
+              closeChat,
+              consentTriggered: consent.hadMarker,
+              consentOk: consent.hadMarker ? closeChat : null,
             })
           )
         );
