@@ -100,7 +100,8 @@ function getExpiredHtmlMetaKeys(meta: any, prefix: "internal" | "public"):
     prefix === "internal" ? "staticHtmlExpiresAt" : "publicHtmlExpiresAt";
 
   const url = typeof meta?.[urlKey] === "string" ? meta[urlKey] : null;
-  const expiresAtIso = typeof meta?.[expiresAtKey] === "string" ? meta[expiresAtKey] : null;
+  const expiresAtIso =
+    typeof meta?.[expiresAtKey] === "string" ? meta[expiresAtKey] : null;
 
   if (!url || !expiresAtIso) return null;
 
@@ -111,7 +112,7 @@ export async function GET() {
   const runStartedAt = new Date();
   const timeZone = process.env.TIMEZONE?.trim() || "Asia/Jerusalem";
 
-  // Decide if we should run cleanup now: local 00:0000:59
+  // Decide if we should run cleanup now: local 00:00
   const localNow = getLocalNow(timeZone);
   const localHour = Number(localNow.toISOString().slice(11, 13));
 
