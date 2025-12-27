@@ -184,6 +184,8 @@ export default function ChatPage() {
       let buffer = "";
       let botText = "";
 
+      let closeChat = false;
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -216,6 +218,8 @@ export default function ChatPage() {
             if (e.event === "final") {
               const reply = typeof e.data?.reply === "string" ? e.data.reply : botText;
               botText = reply;
+              closeChat = e.data?.closeChat === true;
+
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === "bot-stream" ? { ...m, id: crypto.randomUUID(), content: reply } : m
@@ -228,6 +232,12 @@ export default function ChatPage() {
             }
           }
         }
+      }
+
+      if (closeChat) {
+        // After consent-triggered finalization we MUST start a new chat.
+        await new Promise((r) => setTimeout(r, 0));
+        newChat();
       }
     } catch (e: any) {
       setError(e?.message || "Failed to send message");
