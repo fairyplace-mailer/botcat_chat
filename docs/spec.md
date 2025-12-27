@@ -66,6 +66,30 @@ Static domain:
 
 When conversation ends (user left or 1h+ inactive), orchestrator triggers finalization by calling `/api/bot/webhook`.
 
+### 2.1 Immediate finalization on user consent (MANDATORY)
+
+In real life, the user may explicitly ask to send the finalized order to FairyPlace™ designers, or accept BotCat’s proposal to send it.
+
+When the user **consents to sending the order**, BotCat must trigger an immediate finalization via the orchestrator:
+
+- BotCat → Orchestrator: `Consent=true`.
+- Orchestrator triggers finalization (same pipeline as normal end-of-chat):
+  - calls `/api/bot/webhook`
+  - generates transcript artifacts (HTML/PDF)
+  - uploads PDF to Google Drive
+  - sends the **internal email**
+- After internal email is sent, Orchestrator → BotCat: `ok=true`.
+
+**BotCat MUST inform the user about successful order submission ONLY after receiving `ok=true`.**
+
+If finalization fails:
+- BotCat must inform the user that submission failed.
+- BotCat must apologize.
+- BotCat must provide contact coordinates for FairyPlace™ (email + website).
+- BotCat MUST NOT suggest to “retry later”, “contact designers”, or any other improvisation.
+
+If a consent-based submission attempt failed, the orchestrator continues operating in the normal mode (end-of-chat triggers / inactivity triggers).
+
 ---
 
 ## 3. Attachments, LLM inputs & previews
