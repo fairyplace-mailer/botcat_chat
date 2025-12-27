@@ -16,6 +16,12 @@ type ConversationMeta = {
   publicPdfDriveFileId?: string;
 };
 
+type AttachmentPreviewCandidate = {
+  id: string;
+  blob_url_original: string | null;
+  blob_url_preview: string | null;
+};
+
 function addDays(base: Date, days: number): Date {
   const msPerDay = 24 * 60 * 60 * 1000;
   return new Date(base.getTime() + days * msPerDay);
@@ -38,8 +44,8 @@ async function ensureImagePreviews(params: {
     },
   });
 
-  const toGenerate = attachments.filter(
-    (a) => !!a.blob_url_original && !a.blob_url_preview
+  const toGenerate = (attachments as AttachmentPreviewCandidate[]).filter(
+    (a: AttachmentPreviewCandidate) => !!a.blob_url_original && !a.blob_url_preview
   );
 
   for (const att of toGenerate) {
