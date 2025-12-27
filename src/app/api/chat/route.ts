@@ -6,6 +6,9 @@ import { chooseBotCatModel } from "@/lib/model-router";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
 
+const BOT_IMAGE_START = "[[BOT_IMAGE_PNG_BASE64]]";
+const BOT_IMAGE_END = "[[/BOT_IMAGE_PNG_BASE64]]";
+
 const CONSENT_SUCCESS_TEXT =
   "Your order has been successfully sent to FairyPlace\u2122 designers. The designers will contact you as soon as possible.";
 
@@ -44,6 +47,43 @@ function buildExtractedDocumentsBlock(extractedDocuments: any[]): string {
   if (parts.length === 0) return "";
 
   return `\n\n[EXTRACTED DOCUMENTS]\n${parts.join("\n")}`;
+}
+
+function extractBotImagesFromText(text: string): {
+  cleanedText: string;
+  botImages: Array<{ mimeType: "image/png"; base64: string; fileName: string }>;
+} {
+  const botImages: Array<{ mimeType: "image/png"; base64: string; fileName: string }> = [];
+
+  let cleaned = text;
+  let idx = 0;
+
+  while (true) {
+    const start = cleaned.indexOf(BOT_IMAGE_START);
+    if (start === -1) break;
+    const end = cleaned.indexOf(BOT_IMAGE_END, start + BOT_IMAGE_START.length);
+    if (end === -1) break;
+
+    const base64Raw = cleaned
+      .slice(start + BOT_IMAGE_START.length, end)
+      .trim()
+      .replace(/^data:image\/png;base64,/i, "")
+      .replace(/\s+/g, "");
+
+    // remove the block from text
+    cleaned = (cleaned.slice(0, start) + cleaned.slice(end + BOT_IMAGE_END.length)).trim();
+
+    if (base64Raw) {
+      idx += 1;
+      botImages.push({
+        mimeType: "image/png",
+        base64: base64Raw,
+        fileName: `bot_generated_${String(idx).padStart(3, "0")}.png`,
+      });
+    }
+  }
+
+  return { cleanedText: cleaned, botImages };
 }
 
 export async function POST(req: Request) {
@@ -201,7 +241,9 @@ export async function POST(req: Request) {
   const extractedBlock = buildExtractedDocumentsBlock(extractedDocuments);
 
   const systemPrompt =
-    "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.";
+    "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.\n\n" +
+    "If you generate an image, output it as base64 PNG inside a block: " +
+    `${BOT_IMAGE_START}<base64>${BOT_IMAGE_END}. Do not include external image URLs or placeholder links.`;
 
   const extractedDocumentsChars = Array.isArray(extractedDocuments)
     ? extractedDocuments.reduce((sum: number, d: any) => {
@@ -304,7 +346,14 @@ export async function POST(req: Request) {
           }
         }
 
-        controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
+        const { cleanedText, botImages } = extractBotImagesFromText(assistantText);
+
+        if (botImages.length > 0) {
+          controller.enqueue(enc.encode(sse("final", { reply: cleanedText, botImages })));
+        } else {
+          controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
+        }
+
         controller.close();
       } catch (e: any) {
         controller.enqueue(enc.encode(sse("error", { error: e?.message || "Stream error" })));
