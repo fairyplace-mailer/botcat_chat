@@ -3,13 +3,10 @@ import { put } from "@vercel/blob";
 import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
-import { chooseBotCatModel } from "@/lib/model-router";
+import { chooseBotCatImageModel, chooseBotCatModel } from "@/lib/model-router";
 import { detectLanguageIso6391 } from "@/lib/language-detect";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
-
-const BOT_IMAGE_START = "[[BOT_IMAGE_PNG_BASE64]]";
-const BOT_IMAGE_END = "[[/BOT_IMAGE_PNG_BASE64]]";
 
 const CONSENT_SUCCESS_TEXT =
   "Your order has been successfully sent to FairyPlace\u2122 designers. The designers will contact you as soon as possible.";
@@ -51,55 +48,62 @@ function buildExtractedDocumentsBlock(extractedDocuments: any[]): string {
   return `\n\n[EXTRACTED DOCUMENTS]\n${parts.join("\n")}`;
 }
 
-function isPngSignature(buf: Buffer): boolean {
-  if (buf.length < 8) return false;
-  return (
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47 &&
-    buf[4] === 0x0d &&
-    buf[5] === 0x0a &&
-    buf[6] === 0x1a &&
-    buf[7] === 0x0a
-  );
+function buildMessageId(prefix: "u" | "b"): string {
+  const now = new Date();
+  return `FP_${now.toISOString().slice(0, 19).replace(/[:T]/g, "-")}_${crypto
+    .randomUUID()
+    .slice(0, 6)}__${prefix}_001`;
 }
 
-function extractBotImagesFromText(text: string): {
-  cleanedText: string;
-  botImages: Array<{ mimeType: "image/png"; base64: string; fileName: string }>;
-} {
-  const botImages: Array<{ mimeType: "image/png"; base64: string; fileName: string }> = [];
+function extractImageRequest(text: string): { cleanedText: string; prompt: string | null } {
+  // New protocol: text model emits a marker without any base64.
+  // It is intentionally simple and robust.
+  //
+  // [[GENERATE_IMAGE]]
+  // prompt: ...
+  // [[/GENERATE_IMAGE]]
+  const START = "[[GENERATE_IMAGE]]";
+  const END = "[[/GENERATE_IMAGE]]";
 
-  let cleaned = text;
-  let idx = 0;
+  const s = text.indexOf(START);
+  if (s === -1) return { cleanedText: text, prompt: null };
+  const e = text.indexOf(END, s + START.length);
+  if (e === -1) return { cleanedText: text, prompt: null };
 
-  while (true) {
-    const start = cleaned.indexOf(BOT_IMAGE_START);
-    if (start === -1) break;
-    const end = cleaned.indexOf(BOT_IMAGE_END, start + BOT_IMAGE_START.length);
-    if (end === -1) break;
+  const inside = text.slice(s + START.length, e).trim();
+  const cleanedText = (text.slice(0, s) + text.slice(e + END.length)).trim();
 
-    const base64Raw = cleaned
-      .slice(start + BOT_IMAGE_START.length, end)
-      .trim()
-      .replace(/^data:image\/png;base64,/i, "")
-      .replace(/\s+/g, "");
+  // Accept either "prompt: ..." or raw text.
+  const m = inside.match(/prompt\s*:\s*([\s\S]+)/i);
+  const prompt = (m?.[1] ?? inside).trim();
 
-    // remove the block from text
-    cleaned = (cleaned.slice(0, start) + cleaned.slice(end + BOT_IMAGE_END.length)).trim();
+  return { cleanedText, prompt: prompt || null };
+}
 
-    if (base64Raw) {
-      idx += 1;
-      botImages.push({
-        mimeType: "image/png",
-        base64: base64Raw,
-        fileName: `bot_generated_${String(idx).padStart(3, "0")}.png`,
-      });
-    }
+async function generateBotImagePng(prompt: string): Promise<{ fileName: string; mimeType: string; bytes: Buffer; quality: "standard" | "high"; model: string; modelReason: string }> {
+  const { quality, model, reason } = chooseBotCatImageModel({ prompt });
+
+  // Use OpenAI image model (per TZ), not text model base64.
+  // We request PNG because downstream expects image previews to be generated.
+  const result: any = await (openai as any).images.generate({
+    model,
+    prompt,
+    size: quality === "high" ? "1024x1024" : "512x512",
+    // OpenAI image API returns base64 when response_format is set.
+    response_format: "b64_json",
+  });
+
+  const b64 = result?.data?.[0]?.b64_json;
+  if (!b64 || typeof b64 !== "string") {
+    throw new Error("OpenAI image generation returned no b64_json");
   }
 
-  return { cleanedText: cleaned, botImages };
+  const bytes = Buffer.from(b64, "base64");
+  const fileName = `bot_generated_${quality === "high" ? "high" : "std"}_${crypto
+    .randomUUID()
+    .slice(0, 6)}.png`;
+
+  return { fileName, mimeType: "image/png", bytes, quality, model, modelReason: reason };
 }
 
 export async function POST(req: Request) {
@@ -113,12 +117,8 @@ export async function POST(req: Request) {
   const incomingChatName = normalizeChatName(body?.chatName);
 
   const message = typeof body?.message === "string" ? body.message : "";
-  const attachments: BotCatAttachment[] = Array.isArray(body?.attachments)
-    ? body.attachments
-    : [];
-  const extractedDocuments = Array.isArray(body?.extractedDocuments)
-    ? body.extractedDocuments
-    : [];
+  const attachments: BotCatAttachment[] = Array.isArray(body?.attachments) ? body.attachments : [];
+  const extractedDocuments = Array.isArray(body?.extractedDocuments) ? body.extractedDocuments : [];
 
   if (!message.trim() && attachments.length === 0) {
     return NextResponse.json({ ok: false, error: "Empty message" }, { status: 400 });
@@ -159,7 +159,7 @@ export async function POST(req: Request) {
   });
 
   // Persist user message
-  const userMessageId = `FP_${now.toISOString().slice(0, 19).replace(/[:T]/g, "-")}_${crypto.randomUUID().slice(0, 6)}__u_001`;
+  const userMessageId = buildMessageId("u");
 
   await prisma.message.create({
     data: {
@@ -222,8 +222,31 @@ export async function POST(req: Request) {
         },
       });
     }
-  } catch {
-    // ignore
+  } catch (err: any) {
+    // Stage 1 TZ: embeddings are enabled for every user message.
+    // Chat must not fail, but we must log the error.
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          conversation_id: conversation.id,
+          payload: {
+            type: "embedding_failed",
+            messageId: userMessageId,
+            model: (() => {
+              try {
+                return selectBotCatEmbeddingModel();
+              } catch {
+                return null;
+              }
+            })(),
+          },
+          status_code: 200,
+          error_message: String(err?.message ?? err),
+        },
+      });
+    } catch {
+      // avoid cascading failures
+    }
   }
 
   // Read history (simple)
@@ -265,8 +288,10 @@ export async function POST(req: Request) {
 
   const systemPrompt =
     "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.\n\n" +
-    "If you generate an image, output it as base64 PNG inside a block: " +
-    `${BOT_IMAGE_START}<base64>${BOT_IMAGE_END}. Do not include external image URLs or placeholder links.`;
+    "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
+    "[[GENERATE_IMAGE]]\n" +
+    "prompt: <one concise prompt describing the image to generate>\n" +
+    "[[/GENERATE_IMAGE]]\n";
 
   const extractedDocumentsChars = Array.isArray(extractedDocuments)
     ? extractedDocuments.reduce((sum: number, d: any) => {
@@ -276,10 +301,8 @@ export async function POST(req: Request) {
     : 0;
 
   const { model, reason } = chooseBotCatModel({
-    message,
-    extractedDocumentsChars,
-    hasImages: attachments.some(isImage) || historyAttachments.length > 0,
-    historyMessagesCount: history.length,
+    lastUserMessage: message,
+    hasUserAttachments: attachments.length > 0,
   });
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
@@ -369,111 +392,95 @@ export async function POST(req: Request) {
           }
         }
 
-        const { cleanedText, botImages } = extractBotImagesFromText(assistantText);
+        // Image generation (if requested by the text model)
+        const { cleanedText, prompt } = extractImageRequest(assistantText);
+        if (prompt) {
+          const botMessageId = buildMessageId("b");
+          const attachmentId = crypto.randomUUID();
 
-        if (botImages.length > 0) {
-          // Store bot images as Blob + DB attachments (per TZ), then return them as regular attachments.
-          const botAttachments: BotCatAttachment[] = [];
+          // Ensure message exists for FK, then create attachment.
+          const last = await prisma.message.findFirst({
+            where: { conversation_id: conversation.id },
+            orderBy: { sequence: "desc" },
+            select: { sequence: true },
+          });
+          const nextSeq = (last?.sequence ?? 0) + 1;
 
-          // One BotCat message id for this assistant response.
-          const botMessageId = `FP_${new Date()
-            .toISOString()
-            .slice(0, 19)
-            .replace(/[:T]/g, "-")}_${crypto.randomUUID().slice(0, 6)}__b_001`;
+          // Generate image bytes using image model.
+          const img = await generateBotImagePng(prompt);
 
-          for (const img of botImages) {
-            try {
-              const buf = Buffer.from(img.base64, "base64");
-              if (!isPngSignature(buf)) {
-                continue;
-              }
-
-              const uploaded = await put(
-                `bot_generated/${conversation.id}/${img.fileName}`,
-                buf,
-                {
-                  access: "public",
-                  contentType: "image/png",
-                  addRandomSuffix: true,
-                }
-              );
-
-              const attachmentId = crypto.randomUUID();
-
-              // Ensure message exists for FK, then create attachment.
-              const last = await prisma.message.findFirst({
-                where: { conversation_id: conversation.id },
-                orderBy: { sequence: "desc" },
-                select: { sequence: true },
-              });
-              const nextSeq = (last?.sequence ?? 0) + 1;
-
-              await prisma.message.upsert({
-                where: { message_id: botMessageId },
-                create: {
-                  conversation_id: conversation.id,
-                  message_id: botMessageId,
-                  role: "BotCat",
-                  content_original_md: cleanedText || "(bot generated image)",
-                  content_translated_md: null,
-                  has_attachments: true,
-                  has_links: false,
-                  is_voice: false,
-                  created_at: new Date(),
-                  sequence: nextSeq,
-                },
-                update: {
-                  has_attachments: true,
-                },
-              });
-
-              await prisma.attachment.create({
-                data: {
-                  id: attachmentId,
-                  conversation_id: conversation.id,
-                  message_id: botMessageId,
-                  kind: "bot_generated",
-                  file_name: img.fileName,
-                  mime_type: img.mimeType,
-                  file_size_bytes: buf.length,
-                  page_count: null,
-                  external_url: null,
-                  blob_url_original: uploaded.url,
-                  blob_url_preview: null,
-                  expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-                  deleted_at: null,
-                },
-              });
-
-              botAttachments.push({
-                attachmentId,
-                messageId: botMessageId,
-                kind: "bot_generated",
-                fileName: img.fileName,
-                mimeType: img.mimeType,
-                fileSizeBytes: buf.length,
-                pageCount: null,
-                originalUrl: uploaded.url,
-                blobUrlOriginal: uploaded.url,
-                blobUrlPreview: null,
-              });
-            } catch {
-              // ignore single image failure
+          const uploaded = await put(
+            `bot_generated/${conversation.id}/${img.fileName}`,
+            img.bytes,
+            {
+              access: "public",
+              contentType: img.mimeType,
+              addRandomSuffix: true,
             }
-          }
+          );
+
+          await prisma.message.create({
+            data: {
+              conversation_id: conversation.id,
+              message_id: botMessageId,
+              role: "BotCat",
+              content_original_md: cleanedText || "(bot generated image)",
+              content_translated_md: null,
+              has_attachments: true,
+              has_links: false,
+              is_voice: false,
+              created_at: new Date(),
+              sequence: nextSeq,
+            },
+          });
+
+          await prisma.attachment.create({
+            data: {
+              id: attachmentId,
+              conversation_id: conversation.id,
+              message_id: botMessageId,
+              kind: "bot_generated",
+              file_name: img.fileName,
+              mime_type: img.mimeType,
+              file_size_bytes: img.bytes.length,
+              page_count: null,
+              external_url: null,
+              blob_url_original: uploaded.url,
+              blob_url_preview: null,
+              expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+              deleted_at: null,
+            },
+          });
+
+          const botAttachment: BotCatAttachment = {
+            attachmentId,
+            messageId: botMessageId,
+            kind: "bot_generated",
+            fileName: img.fileName,
+            mimeType: img.mimeType,
+            fileSizeBytes: img.bytes.length,
+            pageCount: null,
+            originalUrl: uploaded.url,
+            blobUrlOriginal: uploaded.url,
+            blobUrlPreview: null,
+          };
 
           controller.enqueue(
             enc.encode(
               sse("final", {
                 reply: cleanedText,
-                attachments: botAttachments,
+                attachments: [botAttachment],
+                imageModel: img.model,
+                imageModelReason: img.modelReason,
+                imageQuality: img.quality,
               })
             )
           );
-        } else {
-          controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
+          controller.close();
+          return;
         }
 
+        controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
         controller.close();
       } catch (e: any) {
         controller.enqueue(enc.encode(sse("error", { error: e?.message || "Stream error" })));

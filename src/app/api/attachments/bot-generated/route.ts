@@ -116,9 +116,27 @@ export async function POST(req: Request) {
         expires_at: expiresAt,
       },
     });
-  } catch {
+  } catch (err: any) {
     // If original image is corrupted, don't fail the whole request.
-    // The original URL is still stored and can be inspected.
+    // But DO log it (per TZ: structured logs).
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          conversation_id: conversation.id,
+          payload: {
+            type: "bot_generated_preview_failed",
+            attachmentId: created.id,
+            blobUrlOriginal,
+            fileName,
+            mimeType,
+          },
+          status_code: 200,
+          error_message: String(err?.message ?? err),
+        },
+      });
+    } catch {
+      // avoid cascading failures
+    }
   }
 
   return NextResponse.json({ ok: true });

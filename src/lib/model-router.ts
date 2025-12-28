@@ -1,88 +1,85 @@
-import type { BotCatTextModelKind } from "@/lib/openai";
-import { selectBotCatTextModel } from "@/lib/openai";
+import { selectBotCatTextModel, selectBotCatImageModel } from "@/lib/openai";
 
-export type ChooseBotCatModelInput = {
-  message: string;
-  extractedDocumentsChars: number;
-  hasImages: boolean;
-  historyMessagesCount: number;
-};
+export type BotCatTextModelKind = "chat" | "chat_strong" | "reasoning";
+export type BotCatImageQuality = "standard" | "high";
 
-export type ChooseBotCatModelResult = {
-  kind: BotCatTextModelKind;
-  model: string;
-  reason: string;
-};
+export function chooseBotCatModel(opts: {
+  lastUserMessage: string;
+  hasUserAttachments: boolean;
+}): { kind: BotCatTextModelKind; model: string; reason: string } {
+  const text = (opts.lastUserMessage || "").toLowerCase();
 
-/**
- * Policy-only model router.
- *
- * Responsibilities:
- * - decide which *kind* of text model to use (chat/chat_strong/reasoning)
- * - provide an explainable reason (for logging/SSE meta)
- *
- * Non-responsibilities:
- * - calling OpenAI
- * - transforming messages into OpenAI API format
- */
-export function chooseBotCatModel(input: ChooseBotCatModelInput): ChooseBotCatModelResult {
-  const text = input.message;
-  const lower = text.toLowerCase();
-  const len = text.length;
-
+  // Policy (Stage 1): keep reasoning only for explicit cases.
+  // NOTE: keywords include RU/UA to match real prompts.
   const reasoningHints = [
     "step by step",
-    "reasoning",
-    "prove",
+    "chain of thought",
     "обоснуй",
     "пошагово",
+    "поясни ход",
+    "логика",
   ];
 
-  // Heaviest bucket first.
-  if (len > 2000 || reasoningHints.some((k) => lower.includes(k))) {
-    const kind: BotCatTextModelKind = "reasoning";
+  const strongHints = [
+    "contract",
+    "legal",
+    "compliance",
+    "policy",
+    "spec",
+    "тз",
+    "договор",
+  ];
+
+  if (reasoningHints.some((h) => text.includes(h))) {
     return {
-      kind,
-      model: selectBotCatTextModel(kind),
-      reason: `reasoning: len=${len} hints=${reasoningHints.filter((k) => lower.includes(k)).join(",")}`,
+      kind: "reasoning",
+      model: selectBotCatTextModel("reasoning"),
+      reason: "explicit reasoning keywords",
     };
   }
 
-  // Strong chat when input is large or includes documents/images.
-  if (len > 800) {
-    const kind: BotCatTextModelKind = "chat_strong";
+  if (opts.hasUserAttachments || strongHints.some((h) => text.includes(h))) {
     return {
-      kind,
-      model: selectBotCatTextModel(kind),
-      reason: `chat_strong: len=${len} (>800)`,
+      kind: "chat_strong",
+      model: selectBotCatTextModel("chat_strong"),
+      reason: opts.hasUserAttachments
+        ? "user has attachments"
+        : "strong keywords",
     };
   }
 
-  if (input.extractedDocumentsChars > 0) {
-    const kind: BotCatTextModelKind = "chat_strong";
-    return {
-      kind,
-      model: selectBotCatTextModel(kind),
-      reason: `chat_strong: extractedDocumentsChars=${input.extractedDocumentsChars}`,
-    };
-  }
+  return {
+    kind: "chat",
+    model: selectBotCatTextModel("chat"),
+    reason: "default",
+  };
+}
 
-  if (input.hasImages) {
-    const kind: BotCatTextModelKind = "chat_strong";
-    return {
-      kind,
-      model: selectBotCatTextModel(kind),
-      reason: `chat_strong: hasImages=true`,
-    };
-  }
+export function chooseBotCatImageModel(opts: {
+  prompt: string;
+}): { quality: BotCatImageQuality; model: string; reason: string } {
+  const p = (opts.prompt || "").toLowerCase();
 
-  // Default.
-  {
-    const kind: BotCatTextModelKind = "chat";
-    return {
-      kind,
-      model: selectBotCatTextModel(kind),
-      reason: `chat: default (len=${len})`,
-    };
-  }
+  const highHints = [
+    "moodboard",
+    "mood board",
+    "photorealistic",
+    "key visual",
+    "client",
+    "мудборд",
+    "фотореалістич",
+    "фотореалист",
+    "ключевой визуал",
+    "для клиента",
+  ];
+
+  const quality: BotCatImageQuality = highHints.some((h) => p.includes(h))
+    ? "high"
+    : "standard";
+
+  return {
+    quality,
+    model: selectBotCatImageModel(quality),
+    reason: quality === "high" ? "high-quality keywords" : "default",
+  };
 }
