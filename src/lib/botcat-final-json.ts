@@ -8,9 +8,9 @@ import {
 } from "@/lib/botcat-attachment";
 
 /**
- * Zod-схемы для финального JSON BotCat backend.
+ * Zod- 
  *
- * Важно: структура должна соответствовать контракту (docs/spec.md).
+ * IMPORTANT: structure must match contract in docs/spec.md + docs/spec_initial.md.
  */
 
 // --- Message schema ---
@@ -100,7 +100,19 @@ export async function buildFinalJsonByChatName(
 
   const translatedMessages: BotCatTranslatedMessage[] = (conversation.messages as any[]).map(
     (m) => {
-      const translatedText = m.content_translated_md ?? m.content_original_md ?? "";
+      // TZ rule:
+      // - if languageOriginal==ru -> translated == original (no translation)
+      // - else -> translated MUST exist in DB (no silent fallback)
+      const translatedText =
+        languageOriginal === "ru"
+          ? (m.content_original_md ?? "")
+          : (m.content_translated_md ?? "");
+
+      if (languageOriginal !== "ru" && !translatedText.trim()) {
+        throw new Error(
+          `buildFinalJsonByChatName: missing content_translated_md for message_id=${m.message_id}`
+        );
+      }
 
       return {
         messageId: m.message_id,
