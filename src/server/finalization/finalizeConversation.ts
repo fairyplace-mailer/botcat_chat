@@ -61,27 +61,38 @@ async function ensureImagePreviews(params: {
     const originalUrl = att.blob_url_original;
     if (!originalUrl) continue;
 
-    const preview = await generateWebpPreviewFromBlobUrl({
-      blobUrlOriginal: originalUrl,
-    });
+    try {
+      const preview = await generateWebpPreviewFromBlobUrl({
+        blobUrlOriginal: originalUrl,
+      });
 
-    const previewBlob = await put(
-      `previews/${params.conversationId}/${att.id}.webp`,
-      preview.buffer,
-      {
-        access: "public",
-        contentType: preview.contentType,
-        addRandomSuffix: true,
-      }
-    );
+      const previewBlob = await put(
+        `previews/${params.conversationId}/${att.id}.webp`,
+        preview.buffer,
+        {
+          access: "public",
+          contentType: preview.contentType,
+          addRandomSuffix: true,
+        }
+      );
 
-    await prisma.attachment.update({
-      where: { id: att.id },
-      data: {
-        blob_url_preview: previewBlob.url,
-        expires_at: addDays(params.receivedAt, 30),
-      },
-    });
+      await prisma.attachment.update({
+        where: { id: att.id },
+        data: {
+          blob_url_preview: previewBlob.url,
+          expires_at: addDays(params.receivedAt, 30),
+        },
+      });
+    } catch (e) {
+      // Do NOT fail finalization because of a single corrupted image.
+      // Otherwise PDFs/emails won't be produced.
+      // We keep blob_url_original as-is and continue.
+      console.error(
+        `ensureImagePreviews: failed to generate preview for attachment=${att.id} url=${originalUrl}`,
+        e
+      );
+      continue;
+    }
   }
 }
 
@@ -111,9 +122,9 @@ async function ensureTranslatedMessagesInDb(params: {
   const languageOriginal = String(convo.language_original).trim();
 
   // Only fill missing translations; do not overwrite existing.
-  const missing: TranslationCandidateMessage[] = (convo.messages as TranslationCandidateMessage[]).filter(
-    (m: TranslationCandidateMessage) => m.content_translated_md == null
-  );
+  const missing: TranslationCandidateMessage[] = (
+    convo.messages as TranslationCandidateMessage[]
+  ).filter((m: TranslationCandidateMessage) => m.content_translated_md == null);
   if (missing.length === 0) return;
 
   // TZ: if languageOriginal==ru, translatedMessages must equal original for all messageId.
@@ -181,6 +192,7 @@ export async function finalizeConversationByChatName(params: {
   }
 
   // Mandatory: generate previews before building HTML/PDF.
+  // Best-effort: do not fail whole finalization if a single image is corrupted.
   await ensureImagePreviews({
     conversationId: conversation.id,
     receivedAt,
