@@ -23,6 +23,14 @@ type AttachmentPreviewCandidate = {
   blob_url_preview: string | null;
 };
 
+type TranslationCandidateMessage = {
+  id: string;
+  message_id: string;
+  role: string;
+  content_original_md: string;
+  content_translated_md: string | null;
+};
+
 function addDays(base: Date, days: number): Date {
   const msPerDay = 24 * 60 * 60 * 1000;
   return new Date(base.getTime() + days * msPerDay);
@@ -103,14 +111,16 @@ async function ensureTranslatedMessagesInDb(params: {
   const languageOriginal = String(convo.language_original).trim();
 
   // Only fill missing translations; do not overwrite existing.
-  const missing = convo.messages.filter((m) => m.content_translated_md == null);
+  const missing: TranslationCandidateMessage[] = (convo.messages as TranslationCandidateMessage[]).filter(
+    (m: TranslationCandidateMessage) => m.content_translated_md == null
+  );
   if (missing.length === 0) return;
 
   // TZ: if languageOriginal==ru, translatedMessages must equal original for all messageId.
   // We only fill missing, but the resulting set is still complete.
   if (languageOriginal === "ru") {
     await prisma.$transaction(
-      missing.map((m) =>
+      missing.map((m: TranslationCandidateMessage) =>
         prisma.message.update({
           where: { id: m.id },
           data: { content_translated_md: m.content_original_md },
@@ -123,7 +133,7 @@ async function ensureTranslatedMessagesInDb(params: {
   // Translate missing messages to RU.
   const translated = await translateMessagesToRu({
     languageOriginal,
-    messages: missing.map((m) => ({
+    messages: missing.map((m: TranslationCandidateMessage) => ({
       messageId: m.message_id,
       role: m.role as "User" | "BotCat",
       contentOriginal_md: m.content_original_md,
@@ -133,7 +143,7 @@ async function ensureTranslatedMessagesInDb(params: {
   const byMessageId = new Map(translated.map((t) => [t.messageId, t] as const));
 
   await prisma.$transaction(
-    missing.map((m) => {
+    missing.map((m: TranslationCandidateMessage) => {
       const t = byMessageId.get(m.message_id);
       if (!t) {
         // Hard fail: per TZ translatedMessages must be complete.
