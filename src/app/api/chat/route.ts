@@ -102,10 +102,6 @@ function extractBotImagesFromText(text: string): {
   return { cleanedText: cleaned, botImages };
 }
 
-function bufHexPrefix(buf: Buffer, len = 16): string {
-  return buf.subarray(0, Math.min(buf.length, len)).toString("hex");
-}
-
 export async function POST(req: Request) {
   let body: any;
   try {
@@ -376,9 +372,6 @@ export async function POST(req: Request) {
         const { cleanedText, botImages } = extractBotImagesFromText(assistantText);
 
         if (botImages.length > 0) {
-          // DEBUG: log what we receive inside [[BOT_IMAGE_PNG_BASE64]]... blocks.
-          console.log("botImages: count=", botImages.length);
-
           // Store bot images as Blob + DB attachments (per TZ), then return them as regular attachments.
           const botAttachments: BotCatAttachment[] = [];
 
@@ -390,21 +383,9 @@ export async function POST(req: Request) {
 
           for (const img of botImages) {
             try {
-              const base64Prefix = img.base64.slice(0, 32);
               const buf = Buffer.from(img.base64, "base64");
-              console.log(
-                "botImage base64Prefix=",
-                base64Prefix,
-                "bytes=",
-                buf.length,
-                "hexPrefix=",
-                bufHexPrefix(buf),
-                "pngSig=",
-                isPngSignature(buf)
-              );
 
               if (!isPngSignature(buf)) {
-                // Keep going; we'll learn what signature it really has.
                 continue;
               }
 
@@ -417,33 +398,6 @@ export async function POST(req: Request) {
                   addRandomSuffix: true,
                 }
               );
-
-              // DEBUG: verify blob response headers and first bytes.
-              try {
-                const res = await fetch(uploaded.url);
-                const ct = res.headers.get("content-type");
-                const clen = res.headers.get("content-length");
-                const ab = await res.arrayBuffer();
-                const downloaded = Buffer.from(ab);
-                console.log(
-                  "uploaded blob fetch:",
-                  uploaded.url,
-                  "status=",
-                  res.status,
-                  "ct=",
-                  ct,
-                  "lenHeader=",
-                  clen,
-                  "bytes=",
-                  downloaded.length,
-                  "hexPrefix=",
-                  bufHexPrefix(downloaded),
-                  "pngSig=",
-                  isPngSignature(downloaded)
-                );
-              } catch (e) {
-                console.log("uploaded blob fetch failed:", (e as any)?.message);
-              }
 
               const attachmentId = crypto.randomUUID();
 
@@ -504,8 +458,7 @@ export async function POST(req: Request) {
                 blobUrlOriginal: uploaded.url,
                 blobUrlPreview: null,
               });
-            } catch (e) {
-              console.log("botImage store failed:", (e as any)?.message);
+            } catch {
               // ignore single image failure
             }
           }
