@@ -278,10 +278,8 @@ export async function POST(req: Request) {
     : 0;
 
   const { model, reason } = chooseBotCatModel({
-    message,
-    extractedDocumentsChars,
-    hasImages: attachments.some(isImage) || historyAttachments.length > 0,
-    historyMessagesCount: history.length,
+    lastUserMessage: message,
+    hasUserAttachments: attachments.length > 0,
   });
 
   const messages: any[] = [{ role: "system", content: systemPrompt }];
