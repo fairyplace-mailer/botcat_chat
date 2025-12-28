@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
+import { generateWebpPreviewFromBlobUrl } from "@/server/attachments/preview";
 
 function normalizeChatName(chatName: unknown): string | null {
   if (typeof chatName !== "string") return null;
@@ -73,7 +75,7 @@ export async function POST(req: Request) {
     },
   });
 
-  await prisma.attachment.create({
+  const created = await prisma.attachment.create({
     data: {
       conversation_id: conversation.id,
       message_id: messageId,
@@ -88,7 +90,36 @@ export async function POST(req: Request) {
       expires_at: expiresAt,
       deleted_at: null,
     },
+    select: { id: true },
   });
+
+  // TZ: image previews are mandatory. Best-effort: generate preview immediately.
+  try {
+    const preview = await generateWebpPreviewFromBlobUrl({
+      blobUrlOriginal,
+    });
+
+    const previewBlob = await put(
+      `previews/${conversation.id}/${created.id}.webp`,
+      preview.buffer,
+      {
+        access: "public",
+        contentType: preview.contentType,
+        addRandomSuffix: true,
+      }
+    );
+
+    await prisma.attachment.update({
+      where: { id: created.id },
+      data: {
+        blob_url_preview: previewBlob.url,
+        expires_at: expiresAt,
+      },
+    });
+  } catch {
+    // If original image is corrupted, don't fail the whole request.
+    // The original URL is still stored and can be inspected.
+  }
 
   return NextResponse.json({ ok: true });
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
@@ -48,6 +49,20 @@ function buildExtractedDocumentsBlock(extractedDocuments: any[]): string {
   if (parts.length === 0) return "";
 
   return `\n\n[EXTRACTED DOCUMENTS]\n${parts.join("\n")}`;
+}
+
+function isPngSignature(buf: Buffer): boolean {
+  if (buf.length < 8) return false;
+  return (
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  );
 }
 
 function extractBotImagesFromText(text: string): {
@@ -357,7 +372,104 @@ export async function POST(req: Request) {
         const { cleanedText, botImages } = extractBotImagesFromText(assistantText);
 
         if (botImages.length > 0) {
-          controller.enqueue(enc.encode(sse("final", { reply: cleanedText, botImages })));
+          // Store bot images as Blob + DB attachments (per TZ), then return them as regular attachments.
+          const botAttachments: BotCatAttachment[] = [];
+
+          // One BotCat message id for this assistant response.
+          const botMessageId = `FP_${new Date()
+            .toISOString()
+            .slice(0, 19)
+            .replace(/[:T]/g, "-")}_${crypto.randomUUID().slice(0, 6)}__b_001`;
+
+          for (const img of botImages) {
+            try {
+              const buf = Buffer.from(img.base64, "base64");
+              if (!isPngSignature(buf)) {
+                continue;
+              }
+
+              const uploaded = await put(
+                `bot_generated/${conversation.id}/${img.fileName}`,
+                buf,
+                {
+                  access: "public",
+                  contentType: "image/png",
+                  addRandomSuffix: true,
+                }
+              );
+
+              const attachmentId = crypto.randomUUID();
+
+              // Ensure message exists for FK, then create attachment.
+              const last = await prisma.message.findFirst({
+                where: { conversation_id: conversation.id },
+                orderBy: { sequence: "desc" },
+                select: { sequence: true },
+              });
+              const nextSeq = (last?.sequence ?? 0) + 1;
+
+              await prisma.message.upsert({
+                where: { message_id: botMessageId },
+                create: {
+                  conversation_id: conversation.id,
+                  message_id: botMessageId,
+                  role: "BotCat",
+                  content_original_md: cleanedText || "(bot generated image)",
+                  content_translated_md: null,
+                  has_attachments: true,
+                  has_links: false,
+                  is_voice: false,
+                  created_at: new Date(),
+                  sequence: nextSeq,
+                },
+                update: {
+                  has_attachments: true,
+                },
+              });
+
+              await prisma.attachment.create({
+                data: {
+                  id: attachmentId,
+                  conversation_id: conversation.id,
+                  message_id: botMessageId,
+                  kind: "bot_generated",
+                  file_name: img.fileName,
+                  mime_type: img.mimeType,
+                  file_size_bytes: buf.length,
+                  page_count: null,
+                  external_url: null,
+                  blob_url_original: uploaded.url,
+                  blob_url_preview: null,
+                  expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                  deleted_at: null,
+                },
+              });
+
+              botAttachments.push({
+                attachmentId,
+                messageId: botMessageId,
+                kind: "bot_generated",
+                fileName: img.fileName,
+                mimeType: img.mimeType,
+                fileSizeBytes: buf.length,
+                pageCount: null,
+                originalUrl: uploaded.url,
+                blobUrlOriginal: uploaded.url,
+                blobUrlPreview: null,
+              });
+            } catch {
+              // ignore single image failure
+            }
+          }
+
+          controller.enqueue(
+            enc.encode(
+              sse("final", {
+                reply: cleanedText,
+                attachments: botAttachments,
+              })
+            )
+          );
         } else {
           controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
         }
