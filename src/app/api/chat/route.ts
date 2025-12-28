@@ -83,7 +83,7 @@ function extractImageRequest(text: string): { cleanedText: string; prompt: strin
 async function generateBotImagePng(prompt: string): Promise<{ fileName: string; mimeType: string; bytes: Buffer; quality: "standard" | "high"; model: string; modelReason: string }> {
   const { quality, model, reason } = chooseBotCatImageModel({ prompt });
 
-  // Use OpenAI image model (per TZ), not text model base64.
+  // Use OpenAI image model (per TZ), not text model base64.
   // We request PNG because downstream expects image previews to be generated.
   const result: any = await (openai as any).images.generate({
     model,
@@ -222,8 +222,31 @@ export async function POST(req: Request) {
         },
       });
     }
-  } catch {
-    // ignore
+  } catch (err: any) {
+    // Stage 1 TZ: embeddings are enabled for every user message.
+    // Chat must not fail, but we must log the error.
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          conversation_id: conversation.id,
+          payload: {
+            type: "embedding_failed",
+            messageId: userMessageId,
+            model: (() => {
+              try {
+                return selectBotCatEmbeddingModel();
+              } catch {
+                return null;
+              }
+            })(),
+          },
+          status_code: 200,
+          error_message: String(err?.message ?? err),
+        },
+      });
+    } catch {
+      // avoid cascading failures
+    }
   }
 
   // Read history (simple)
