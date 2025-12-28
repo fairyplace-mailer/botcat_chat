@@ -5,7 +5,6 @@ import Link from "next/link";
 import ChatWindow, { type Message as UIMessage } from "@/components/chat/ChatWindow";
 import MessageInput, { type MessageInputData } from "@/components/chat/MessageInput";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
-import { upload } from "@vercel/blob/client";
 
 export type ChatMessage = {
   id: string;
@@ -98,41 +97,11 @@ const CONSENT_SUCCESS_TEXT =
 const CONSENT_ERROR_TEXT =
   "Unfortunately, we could not forward your order to FairyPlace\u2122 designers. However, you can contact them directly via email at fairyplace.tm@gmail.com or via the contacts on the website www.fairyplace.biz.";
 
-type BotImage = {
-  mimeType: "image/png";
-  base64: string;
-  fileName: string;
-};
-
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const cleaned = base64.replace(/^data:[^;]+;base64,/i, "").replace(/\s+/g, "");
-  const binary = atob(cleaned);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType });
-}
-
 function makeBotMessageId() {
   // Stable-ish id format similar to user ids, but bot-marked.
   const ts = new Date().toISOString().replace(/[-:.TZ]/g, "");
   const rand = Math.random().toString(16).slice(2, 8);
   return `FP_${ts}_${rand}__b_001`;
-}
-
-async function persistBotGeneratedAttachment(params: {
-  chatName: string;
-  messageId: string;
-  fileName: string;
-  mimeType: string;
-  fileSizeBytes: number;
-  blobUrlOriginal: string;
-}) {
-  await fetch("/api/attachments/bot-generated", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
 }
 
 export default function ChatPage() {
@@ -257,7 +226,6 @@ export default function ChatPage() {
 
       let closeChat = false;
       let consentOk: boolean | null = null;
-      let botImages: BotImage[] = [];
       let finalBotMessageId: string | null = null;
 
       while (true) {
@@ -294,14 +262,24 @@ export default function ChatPage() {
               botText = reply;
               closeChat = e.data?.closeChat === true;
               consentOk = typeof e.data?.consentOk === "boolean" ? e.data.consentOk : null;
-              botImages = Array.isArray(e.data?.botImages) ? e.data.botImages : [];
 
               const newId = makeBotMessageId();
               finalBotMessageId = newId;
 
+              const finalAttachments: BotCatAttachment[] = Array.isArray(e.data?.attachments)
+                ? e.data.attachments
+                : [];
+
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === "bot-stream" ? { ...m, id: newId, content: reply } : m
+                  m.id === "bot-stream"
+                    ? {
+                        ...m,
+                        id: newId,
+                        content: reply,
+                        attachments: finalAttachments,
+                      }
+                    : m
                 )
               );
             }
@@ -310,66 +288,6 @@ export default function ChatPage() {
               throw new Error(e.data?.error || "Stream error");
             }
           }
-        }
-      }
-
-      // If bot returned images, upload them to Blob and append to last bot message.
-      if (botImages.length > 0 && finalBotMessageId) {
-        const uploadedAtts: BotCatAttachment[] = [];
-
-        for (const img of botImages) {
-          try {
-            const blob = base64ToBlob(img.base64, img.mimeType);
-            const file = new File([blob], img.fileName, { type: img.mimeType });
-
-            const uploaded = await upload(img.fileName, file, {
-              access: "public",
-              handleUploadUrl: "/api/blob/upload",
-              contentType: img.mimeType,
-            });
-
-            const attachmentId = crypto.randomUUID();
-            uploadedAtts.push({
-              attachmentId,
-              messageId: finalBotMessageId,
-              kind: "bot_generated",
-              fileName: img.fileName,
-              mimeType: img.mimeType,
-              fileSizeBytes: file.size,
-              pageCount: null,
-              originalUrl: uploaded.url,
-              blobUrlOriginal: uploaded.url,
-              blobUrlPreview: null,
-            });
-
-            // Persist to DB (best-effort)
-            if (chatName) {
-              try {
-                await persistBotGeneratedAttachment({
-                  chatName,
-                  messageId: finalBotMessageId,
-                  fileName: img.fileName,
-                  mimeType: img.mimeType,
-                  fileSizeBytes: file.size,
-                  blobUrlOriginal: uploaded.url,
-                });
-              } catch {
-                // ignore
-              }
-            }
-          } catch {
-            // ignore single image failure
-          }
-        }
-
-        if (uploadedAtts.length > 0) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === finalBotMessageId
-                ? { ...m, attachments: [...(m.attachments ?? []), ...uploadedAtts] }
-                : m
-            )
-          );
         }
       }
 
@@ -430,7 +348,7 @@ export default function ChatPage() {
         >
           <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
             <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>
-              {`BotCat${TM} Instant (v1.0)`}
+              {`BotCat\u2122 Instant (v1.0)`}
             </div>
             {chatName ? (
               <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{chatName}</div>
