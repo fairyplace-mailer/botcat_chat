@@ -1,5 +1,5 @@
 import type { BotCatTextModelKind } from "@/lib/openai";
-import { selectBotCatTextModel } from "@/lib/openai";
+import { selectBotCatImageModel, selectBotCatTextModel } from "@/lib/openai";
 
 export type ChooseBotCatModelInput = {
   message: string;
@@ -10,6 +10,19 @@ export type ChooseBotCatModelInput = {
 
 export type ChooseBotCatModelResult = {
   kind: BotCatTextModelKind;
+  model: string;
+  reason: string;
+};
+
+export type BotCatImageQuality = "standard" | "high";
+
+export type ChooseBotCatImageModelInput = {
+  /** Natural language description / prompt of what we want to generate. */
+  prompt: string;
+};
+
+export type ChooseBotCatImageModelResult = {
+  quality: BotCatImageQuality;
   model: string;
   reason: string;
 };
@@ -34,8 +47,8 @@ export function chooseBotCatModel(input: ChooseBotCatModelInput): ChooseBotCatMo
     "step by step",
     "reasoning",
     "prove",
-    "обоснуй",
-    "пошагово",
+    "",
+    "",
   ];
 
   // Heaviest bucket first.
@@ -85,4 +98,35 @@ export function chooseBotCatModel(input: ChooseBotCatModelInput): ChooseBotCatMo
       reason: `chat: default (len=${len})`,
     };
   }
+}
+
+/**
+ * Policy-only router for image generation model.
+ *
+ * Spec: docs/spec_initial.md 3.2.6.3.4
+ * - standard: OPENAI_MODEL_IMAGE
+ * - high: OPENAI_MODEL_IMAGE_HIGH
+ */
+export function chooseBotCatImageModel(input: ChooseBotCatImageModelInput): ChooseBotCatImageModelResult {
+  const prompt = input.prompt ?? "";
+  const lower = prompt.toLowerCase();
+
+  const highHints = [
+    "moodboard",
+    "mood board",
+    "",
+    "photorealistic",
+    "",
+    "",
+    "",
+    "",
+  ];
+
+  const quality: BotCatImageQuality = highHints.some((k) => lower.includes(k)) ? "high" : "standard";
+
+  return {
+    quality,
+    model: selectBotCatImageModel(quality),
+    reason: `image:${quality} hints=${highHints.filter((k) => lower.includes(k)).join(",") || "-"}`,
+  };
 }
