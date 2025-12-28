@@ -3,6 +3,7 @@ import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
 import { chooseBotCatModel } from "@/lib/model-router";
+import { detectLanguageIso6391 } from "@/lib/language-detect";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
 
@@ -113,6 +114,8 @@ export async function POST(req: Request) {
   // Create/ensure conversation
   const chatName = incomingChatName ?? `chat_${crypto.randomUUID().slice(0, 8)}`;
 
+  const detectedLang = detectLanguageIso6391(message);
+
   const conversation = await prisma.conversation.upsert({
     where: { chat_name: chatName },
     create: {
@@ -126,12 +129,17 @@ export async function POST(req: Request) {
       finished_at: null,
       last_activity_at: now,
       message_count: 0,
-      language_original: "en",
+      language_original: detectedLang ?? "und",
       meta: {},
     },
     update: {
       status: "active",
       last_activity_at: now,
+      ...(detectedLang
+        ? {
+            language_original: detectedLang,
+          }
+        : {}),
     },
   });
 

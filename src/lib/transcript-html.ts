@@ -315,7 +315,7 @@ export function buildTranscriptHtml(
   const footerHtml = `
       <div class="footer-block">
         <p>Email with conversation materials. Links are valid for 30 days.</p>
-        <p>Sent by FairyPlace Mailer</p>
+        <p>Sent by FairyPlace\u2122 Mailer</p>
       </div>
     `;
 

@@ -36,10 +36,42 @@ export async function POST(req: Request) {
   });
 
   if (!conversation) {
-    return NextResponse.json({ ok: false, error: "Conversation not found" }, { status: 404 });
+    return NextResponse.json(
+      { ok: false, error: "Conversation not found" },
+      { status: 404 }
+    );
   }
 
+  const now = new Date();
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  // Ensure the referenced message exists to satisfy FK Attachment_message_id_fkey.
+  // We keep content minimal; the UI owns the visible transcript.
+  const last = await prisma.message.findFirst({
+    where: { conversation_id: conversation.id },
+    orderBy: { sequence: "desc" },
+    select: { sequence: true },
+  });
+  const nextSeq = (last?.sequence ?? 0) + 1;
+
+  await prisma.message.upsert({
+    where: { message_id: messageId },
+    create: {
+      conversation_id: conversation.id,
+      message_id: messageId,
+      role: "BotCat",
+      content_original_md: "(bot generated image)",
+      content_translated_md: null,
+      has_attachments: true,
+      has_links: false,
+      is_voice: false,
+      created_at: now,
+      sequence: nextSeq,
+    },
+    update: {
+      has_attachments: true,
+    },
+  });
 
   await prisma.attachment.create({
     data: {

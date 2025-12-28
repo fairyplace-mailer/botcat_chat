@@ -8,12 +8,12 @@ import {
 } from "@/lib/botcat-attachment";
 
 /**
- * Zod-   BotCat  backend.
+ * Zod- 
  *
- * :      (docs/spec.md).
+ * IMPORTANT: structure must match contract in docs/spec.md + docs/spec_initial.md.
  */
 
-// --- - ---
+// --- Message schema ---
 
 export const BotCatMessageRoleSchema = z.enum(["User", "BotCat"]);
 
@@ -37,14 +37,15 @@ export const BotCatTranslatedMessageSchema = z.object({
 
 export type BotCatTranslatedMessage = z.infer<typeof BotCatTranslatedMessageSchema>;
 
-// ---  JSON ---
+// --- Final JSON schema ---
 
 export const BotCatFinalJsonSchema = z.object({
-  // IMPORTANT: chatName        /.
+  // IMPORTANT: chatName is used in URLs and storage keys.
   chatName: z.string().min(1),
 
-  languageOriginal: z.string().min(2).max(5),
-  // Per MANDATORY: language is always "ru" (language of translatedMessages).
+  // ISO-639-1 preferred, but we store what we have in DB.
+  languageOriginal: z.string().min(2).max(8),
+  // Per MANDATORY: translatedMessages language is always "ru".
   language: z.literal("ru"),
 
   messages: z.array(BotCatMessageSchema),
@@ -60,17 +61,12 @@ export const BotCatFinalJsonSchema = z.object({
 
 export type BotCatFinalJson = z.infer<typeof BotCatFinalJsonSchema>;
 
-// ---    JSON ---
-
 export type BuildFinalJsonOptions = {
   preamble_md?: string;
   footerInternal_md?: string;
   footerClient_md?: string;
 };
 
-/**
- *   JSON  chatName  .
- */
 export async function buildFinalJsonByChatName(
   chatName: string,
   options: BuildFinalJsonOptions = {}
@@ -99,12 +95,24 @@ export async function buildFinalJsonByChatName(
     createdAt: m.created_at.toISOString(),
   }));
 
-  const languageOriginal =
-    (conversation.language_original || "und").trim() || "und";
+  // Source of truth: DB.
+  const languageOriginal = String(conversation.language_original).trim();
 
   const translatedMessages: BotCatTranslatedMessage[] = (conversation.messages as any[]).map(
     (m) => {
-      const translatedText = m.content_translated_md ?? m.content_original_md ?? "";
+      // TZ rule:
+      // - if languageOriginal==ru -> translated == original (no translation)
+      // - else -> translated MUST exist in DB (no silent fallback)
+      const translatedText =
+        languageOriginal === "ru"
+          ? (m.content_original_md ?? "")
+          : (m.content_translated_md ?? "");
+
+      if (languageOriginal !== "ru" && !translatedText.trim()) {
+        throw new Error(
+          `buildFinalJsonByChatName: missing content_translated_md for message_id=${m.message_id}`
+        );
+      }
 
       return {
         messageId: m.message_id,
