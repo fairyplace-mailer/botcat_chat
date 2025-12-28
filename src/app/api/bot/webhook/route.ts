@@ -17,12 +17,12 @@ type IncomingRole =
   | "system"
   | "tool";
 
-function normalizeIncomingRole(role: unknown): "user" | "assistant" {
+function normalizeIncomingRoleForDb(role: unknown): "User" | "BotCat" {
   const r = typeof role === "string" ? role : "";
-  if (r === "user" || r === "User") return "user";
-  if (r === "assistant" || r === "BotCat") return "assistant";
-  // default to assistant (safer than failing hard; role isn't used for constraints)
-  return "assistant";
+  if (r === "user" || r === "User") return "User";
+  if (r === "assistant" || r === "BotCat") return "BotCat";
+  // Be safe: default to BotCat (non-user) to avoid rendering everything as User
+  return "BotCat";
 }
 
 interface BotCatMessageJson {
@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
       return {
         conversation_id: conversation.id,
         message_id: msg.messageId,
-        role: normalizeIncomingRole(msg.role),
+        role: normalizeIncomingRoleForDb(msg.role),
         content_original_md: normalizeMessageContent(msg),
         content_translated_md: translated?.contentTranslated_md ?? null,
         has_attachments: !!msg.hasAttachments,
