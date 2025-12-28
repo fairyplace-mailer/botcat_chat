@@ -113,6 +113,13 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
+function makeBotMessageId() {
+  // Stable-ish id format similar to user ids, but bot-marked.
+  const ts = new Date().toISOString().replace(/[-:.TZ]/g, "");
+  const rand = Math.random().toString(16).slice(2, 8);
+  return `FP_${ts}_${rand}__b_001`;
+}
+
 async function persistBotGeneratedAttachment(params: {
   chatName: string;
   messageId: string;
@@ -289,7 +296,7 @@ export default function ChatPage() {
               consentOk = typeof e.data?.consentOk === "boolean" ? e.data.consentOk : null;
               botImages = Array.isArray(e.data?.botImages) ? e.data.botImages : [];
 
-              const newId = crypto.randomUUID();
+              const newId = makeBotMessageId();
               finalBotMessageId = newId;
 
               setMessages((prev) =>
@@ -307,7 +314,7 @@ export default function ChatPage() {
       }
 
       // If bot returned images, upload them to Blob and append to last bot message.
-      if (botImages.length > 0) {
+      if (botImages.length > 0 && finalBotMessageId) {
         const uploadedAtts: BotCatAttachment[] = [];
 
         for (const img of botImages) {
@@ -324,7 +331,7 @@ export default function ChatPage() {
             const attachmentId = crypto.randomUUID();
             uploadedAtts.push({
               attachmentId,
-              messageId: "ui-memory",
+              messageId: finalBotMessageId,
               kind: "bot_generated",
               fileName: img.fileName,
               mimeType: img.mimeType,
@@ -336,7 +343,7 @@ export default function ChatPage() {
             });
 
             // Persist to DB (best-effort)
-            if (finalBotMessageId && chatName) {
+            if (chatName) {
               try {
                 await persistBotGeneratedAttachment({
                   chatName,
@@ -356,17 +363,13 @@ export default function ChatPage() {
         }
 
         if (uploadedAtts.length > 0) {
-          setMessages((prev) => {
-            const next = [...prev];
-            for (let i = next.length - 1; i >= 0; i -= 1) {
-              if (next[i].role === "BotCat") {
-                const existing = next[i].attachments ?? [];
-                next[i] = { ...next[i], attachments: [...existing, ...uploadedAtts] };
-                break;
-              }
-            }
-            return next;
-          });
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === finalBotMessageId
+                ? { ...m, attachments: [...(m.attachments ?? []), ...uploadedAtts] }
+                : m
+            )
+          );
         }
       }
 
@@ -438,7 +441,12 @@ export default function ChatPage() {
             <Link href="/" className="btn-secondary">
               Home
             </Link>
-            <button type="button" onClick={newChat} disabled={!canReset || isStreaming} className="btn-primary">
+            <button
+              type="button"
+              onClick={newChat}
+              disabled={!canReset || isStreaming}
+              className="btn-primary"
+            >
               New Chat
             </button>
           </div>
@@ -447,9 +455,14 @@ export default function ChatPage() {
         {consentBanner ? (
           <div
             style={{
-              background: consentBanner.kind === "success" ? "rgba(16, 185, 129, 0.12)" : "rgba(176, 0, 32, 0.10)",
+              background:
+                consentBanner.kind === "success"
+                  ? "rgba(16, 185, 129, 0.12)"
+                  : "rgba(176, 0, 32, 0.10)",
               border: `1px solid ${
-                consentBanner.kind === "success" ? "rgba(16, 185, 129, 0.35)" : "rgba(176, 0, 32, 0.25)"
+                consentBanner.kind === "success"
+                  ? "rgba(16, 185, 129, 0.35)"
+                  : "rgba(176, 0, 32, 0.25)"
               }`,
               borderRadius: 12,
               padding: "12px 14px",
@@ -475,9 +488,7 @@ export default function ChatPage() {
           </div>
         ) : null}
 
-        {error ? (
-          <div style={{ color: "#b00020", fontSize: 14 }}>Error: {error}</div>
-        ) : null}
+        {error ? <div style={{ color: "#b00020", fontSize: 14 }}>Error: {error}</div> : null}
 
         {/* Chat area */}
         <section
