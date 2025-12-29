@@ -80,7 +80,24 @@ function extractImageRequest(text: string): { cleanedText: string; prompt: strin
   return { cleanedText, prompt: prompt || null };
 }
 
-async function generateBotImagePng(prompt: string): Promise<{ fileName: string; mimeType: string; bytes: Buffer; quality: "standard" | "high"; model: string; modelReason: string }> {
+type OpenAiImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
+
+function chooseImageSize(quality: "standard" | "high"): OpenAiImageSize {
+  // Per runtime errors from OpenAI in this environment, 512x512 is not supported.
+  // Supported: 1024x1024, 1024x1536, 1536x1024, auto.
+  // Keep Stage 1 stable: always 1024x1024.
+  // (We can later make portrait/landscape selection by prompt intent.)
+  return "1024x1024";
+}
+
+async function generateBotImagePng(prompt: string): Promise<{
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer;
+  quality: "standard" | "high";
+  model: string;
+  modelReason: string;
+}> {
   const { quality, model, reason } = chooseBotCatImageModel({ prompt });
 
   // Use OpenAI image model (per TZ), not text model base64.
@@ -89,7 +106,7 @@ async function generateBotImagePng(prompt: string): Promise<{ fileName: string; 
   const result: any = await (openai as any).images.generate({
     model,
     prompt,
-    size: quality === "high" ? "1024x1024" : "512x512",
+    size: chooseImageSize(quality),
   });
 
   const b64 = result?.data?.[0]?.b64_json;
