@@ -84,13 +84,12 @@ async function generateBotImagePng(prompt: string): Promise<{ fileName: string; 
   const { quality, model, reason } = chooseBotCatImageModel({ prompt });
 
   // Use OpenAI image model (per TZ), not text model base64.
-  // We request PNG because downstream expects image previews to be generated.
+  // NOTE: openai@6.x images.generate does NOT accept response_format.
+  // It returns base64 in result.data[0].b64_json by default.
   const result: any = await (openai as any).images.generate({
     model,
     prompt,
     size: quality === "high" ? "1024x1024" : "512x512",
-    // OpenAI image API returns base64 when response_format is set.
-    response_format: "b64_json",
   });
 
   const b64 = result?.data?.[0]?.b64_json;
