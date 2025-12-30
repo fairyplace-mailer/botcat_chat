@@ -3,6 +3,11 @@ import { prisma } from "@/lib/prisma";
 
 const DEFAULT_EVERY_N_MESSAGES = 4;
 
+type LastMessage = {
+  role: string;
+  content_original_md: string | null;
+};
+
 export type UpdateSessionSummaryResult =
   | { updated: false; reason: "not_needed" | "no_conversation" | "no_messages" }
   | { updated: true; summary: string };
@@ -41,7 +46,7 @@ export async function updateSessionSummaryIfNeeded(opts: {
     return { updated: false, reason: "not_needed" };
   }
 
-  const lastMessages = await prisma.message.findMany({
+  const lastMessages: LastMessage[] = await prisma.message.findMany({
     where: { conversation_id: convo.id },
     orderBy: { sequence: "desc" },
     take: 20,
@@ -56,7 +61,7 @@ export async function updateSessionSummaryIfNeeded(opts: {
   const transcript = lastMessages
     .slice()
     .reverse()
-    .map((m) => `${m.role}: ${m.content_original_md}`)
+    .map((m: LastMessage) => `${m.role}: ${m.content_original_md ?? ""}`)
     .join("\n\n");
 
   const system =
