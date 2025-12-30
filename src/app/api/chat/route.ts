@@ -9,6 +9,7 @@ import {
   formatReferenceContextBlock,
   retrieveRelevantReferenceChunks,
 } from "@/server/rag/retrieval";
+import { updateSessionSummaryIfNeeded } from "@/server/rag/session-summary";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
 
@@ -271,6 +272,36 @@ export async function POST(req: Request) {
     }
   }
 
+  // Session summary update (per docs/spec_embedding_rag.md): every 3-5 messages.
+  // Best-effort, must not fail chat.
+  let sessionSummaryText = "";
+  try {
+    const res = await updateSessionSummaryIfNeeded({ chatName, everyNMessages: 4 });
+    if (res.updated) sessionSummaryText = res.summary;
+    else {
+      // If not updated, we can still read existing summary from meta
+      const meta = (conversation.meta ?? {}) as any;
+      if (typeof meta.sessionSummary === "string") sessionSummaryText = meta.sessionSummary;
+    }
+  } catch (err: any) {
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          conversation_id: conversation.id,
+          payload: { type: "session_summary_failed", messageId: userMessageId },
+          status_code: 200,
+          error_message: String(err?.message ?? err),
+        },
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  const sessionSummaryBlock = sessionSummaryText
+    ? `[SESSION SUMMARY]\n${sessionSummaryText}\n[/SESSION SUMMARY]\n\n`
+    : "";
+
   // RAG retrieval (per spec_embedding_rag.md): if embedding missing, proceed without RAG.
   let referenceContextBlock = "";
   if (messageEmbedding) {
@@ -338,6 +369,7 @@ export async function POST(req: Request) {
 
   const systemPrompt =
     "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.\n\n" +
+    sessionSummaryBlock +
     (referenceContextBlock ? `${referenceContextBlock}\n\n` : "") +
     "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
     "[[GENERATE_IMAGE]]\n" +
