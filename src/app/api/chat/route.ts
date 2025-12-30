@@ -5,6 +5,12 @@ import { prisma } from "@/lib/prisma";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
 import { chooseBotCatImageModel, chooseBotCatModel } from "@/lib/model-router";
 import { detectLanguageIso6391 } from "@/lib/language-detect";
+import {
+  formatReferenceContextBlock,
+  retrieveRelevantReferenceChunks,
+} from "@/server/rag/retrieval";
+import { updateSessionSummaryIfNeeded } from "@/server/rag/session-summary";
+import { buildBotCatSystemPrompt } from "@/lib/botcat-chat-prompt";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
 
@@ -82,11 +88,9 @@ function extractImageRequest(text: string): { cleanedText: string; prompt: strin
 
 type OpenAiImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 
-function chooseImageSize(quality: "standard" | "high"): OpenAiImageSize {
-  // Per runtime errors from OpenAI in this environment, 512x512 is not supported.
+function chooseImageSize(_quality: "standard" | "high"): OpenAiImageSize {
   // Supported: 1024x1024, 1024x1536, 1536x1024, auto.
   // Keep Stage 1 stable: always 1024x1024.
-  // (We can later make portrait/landscape selection by prompt intent.)
   return "1024x1024";
 }
 
@@ -100,9 +104,6 @@ async function generateBotImagePng(prompt: string): Promise<{
 }> {
   const { quality, model, reason } = chooseBotCatImageModel({ prompt });
 
-  // Use OpenAI image model (per TZ), not text model base64.
-  // NOTE: openai@6.x images.generate does NOT accept response_format.
-  // It returns base64 in result.data[0].b64_json by default.
   const result: any = await (openai as any).images.generate({
     model,
     prompt,
@@ -151,8 +152,6 @@ export async function POST(req: Request) {
     where: { chat_name: chatName },
     create: {
       chat_name: chatName,
-      // IMPORTANT: sessionId is NOT a User.id. user_id is a FK to User table.
-      // Stage 1 uses anonymous sessions, so keep user_id null.
       user_id: null,
       status: "active",
       send_to_internal: true,
@@ -192,6 +191,15 @@ export async function POST(req: Request) {
     },
   });
 
+  // Keep message_count in sync (used by session summary trigger)
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: {
+      message_count: { increment: 1 },
+      last_activity_at: now,
+    },
+  });
+
   // Attachments (best-effort)
   if (attachments.length > 0) {
     const attachmentRows = attachments.map((a) => ({
@@ -202,7 +210,6 @@ export async function POST(req: Request) {
       mime_type: a.mimeType ?? null,
       file_size_bytes: a.fileSizeBytes ?? null,
       page_count: a.pageCount ?? null,
-      // Attachment model uses external_url, not original_url
       external_url: a.originalUrl ?? null,
       blob_url_original: a.blobUrlOriginal ?? null,
       blob_url_preview: a.blobUrlPreview ?? null,
@@ -217,12 +224,14 @@ export async function POST(req: Request) {
     }
   }
 
-  // Embedding best-effort (Prisma schema expects vector+dims)
+  // Embedding best-effort
+  let messageEmbedding: number[] | null = null;
   try {
     const embeddingModel = selectBotCatEmbeddingModel();
     const emb = await openai.embeddings.create({ model: embeddingModel, input: message });
     const vec = emb.data?.[0]?.embedding;
     if (vec && Array.isArray(vec) && vec.length > 0) {
+      messageEmbedding = vec as number[];
       await prisma.messageEmbedding.upsert({
         where: { message_id: userMessageId },
         create: {
@@ -239,8 +248,6 @@ export async function POST(req: Request) {
       });
     }
   } catch (err: any) {
-    // Stage 1 TZ: embeddings are enabled for every user message.
-    // Chat must not fail, but we must log the error.
     try {
       await prisma.webhookLog.create({
         data: {
@@ -261,11 +268,79 @@ export async function POST(req: Request) {
         },
       });
     } catch {
-      // avoid cascading failures
+      // ignore
     }
   }
 
-  // Read history (simple)
+  // Session summary update (best-effort)
+  let sessionSummaryText = "";
+  try {
+    const res = await updateSessionSummaryIfNeeded({ chatName, everyNMessages: 4 });
+    if (res.updated) sessionSummaryText = res.summary;
+    else {
+      const meta = (conversation.meta ?? {}) as any;
+      if (typeof meta.sessionSummary === "string") sessionSummaryText = meta.sessionSummary;
+    }
+  } catch (err: any) {
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          conversation_id: conversation.id,
+          payload: { type: "session_summary_failed", messageId: userMessageId },
+          status_code: 200,
+          error_message: String(err?.message ?? err),
+        },
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  const sessionSummaryBlock = sessionSummaryText
+    ? `[SESSION SUMMARY]\n${sessionSummaryText}\n[/SESSION SUMMARY]`
+    : "";
+
+  // RAG retrieval (best-effort)
+  let referenceContextBlock = "";
+  if (messageEmbedding) {
+    try {
+      const chunks = await retrieveRelevantReferenceChunks({
+        queryEmbedding: messageEmbedding,
+        topK: 5,
+      });
+      referenceContextBlock = formatReferenceContextBlock(chunks);
+    } catch (err: any) {
+      try {
+        await prisma.webhookLog.create({
+          data: {
+            conversation_id: conversation.id,
+            payload: {
+              type: "rag_retrieval_failed",
+              messageId: userMessageId,
+            },
+            status_code: 200,
+            error_message: String(err?.message ?? err),
+          },
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const imageInstructionBlock =
+    "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
+    "[[GENERATE_IMAGE]]\n" +
+    "prompt: <one concise prompt describing the image to generate>\n" +
+    "[[/GENERATE_IMAGE]]";
+
+  const systemPrompt = buildBotCatSystemPrompt({
+    sessionSummaryBlock,
+    referenceContextBlock,
+    imageInstructionBlock,
+  });
+
+  // Read history
   const history = await prisma.message.findMany({
     where: { conversation_id: conversation.id },
     orderBy: { sequence: "asc" },
@@ -301,20 +376,6 @@ export async function POST(req: Request) {
   }
 
   const extractedBlock = buildExtractedDocumentsBlock(extractedDocuments);
-
-  const systemPrompt =
-    "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.\n\n" +
-    "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
-    "[[GENERATE_IMAGE]]\n" +
-    "prompt: <one concise prompt describing the image to generate>\n" +
-    "[[/GENERATE_IMAGE]]\n";
-
-  const extractedDocumentsChars = Array.isArray(extractedDocuments)
-    ? extractedDocuments.reduce((sum: number, d: any) => {
-        const t = typeof d?.text === "string" ? d.text : "";
-        return sum + t.length;
-      }, 0)
-    : 0;
 
   const { model, reason } = chooseBotCatModel({
     lastUserMessage: message,
@@ -422,7 +483,6 @@ export async function POST(req: Request) {
           });
           const nextSeq = (last?.sequence ?? 0) + 1;
 
-          // Generate image bytes using image model.
           const img = await generateBotImagePng(prompt);
 
           const uploaded = await put(
@@ -447,6 +507,15 @@ export async function POST(req: Request) {
               is_voice: false,
               created_at: new Date(),
               sequence: nextSeq,
+            },
+          });
+
+          // Increment message_count for bot message
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              message_count: { increment: 1 },
+              last_activity_at: new Date(),
             },
           });
 
@@ -495,6 +564,37 @@ export async function POST(req: Request) {
           controller.close();
           return;
         }
+
+        const lastSeq = await prisma.message.findFirst({
+          where: { conversation_id: conversation.id },
+          orderBy: { sequence: "desc" },
+          select: { sequence: true },
+        });
+        const nextSeq = (lastSeq?.sequence ?? 0) + 1;
+
+        await prisma.message.create({
+          data: {
+            conversation_id: conversation.id,
+            message_id: buildMessageId("b"),
+            role: "BotCat",
+            content_original_md: assistantText,
+            content_translated_md: null,
+            has_attachments: false,
+            has_links: false,
+            is_voice: false,
+            created_at: new Date(),
+            sequence: nextSeq,
+          },
+        });
+
+        // Increment message_count for bot message
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            message_count: { increment: 1 },
+            last_activity_at: new Date(),
+          },
+        });
 
         controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
         controller.close();

@@ -16,6 +16,10 @@ export const metadata: Metadata = {
   title: "BotCat™ Consultant by FairyPlace™",
   description:
     "BotCat™ by FairyPlace™ helps you create bespoke surface designs for fabric, wallpaper, and leather.",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    apple: "/BotCat_Portrait_180.png",
+  },
 };
 
 export default function RootLayout({
