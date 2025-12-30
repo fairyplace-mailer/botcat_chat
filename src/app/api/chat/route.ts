@@ -10,6 +10,7 @@ import {
   retrieveRelevantReferenceChunks,
 } from "@/server/rag/retrieval";
 import { updateSessionSummaryIfNeeded } from "@/server/rag/session-summary";
+import { buildBotCatSystemPrompt } from "@/lib/botcat-chat-prompt";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
 
@@ -87,11 +88,9 @@ function extractImageRequest(text: string): { cleanedText: string; prompt: strin
 
 type OpenAiImageSize = "1024x1024" | "1024x1536" | "1536x1024" | "auto";
 
-function chooseImageSize(quality: "standard" | "high"): OpenAiImageSize {
-  // Per runtime errors from OpenAI in this environment, 512x512 is not supported.
+function chooseImageSize(_quality: "standard" | "high"): OpenAiImageSize {
   // Supported: 1024x1024, 1024x1536, 1536x1024, auto.
   // Keep Stage 1 stable: always 1024x1024.
-  // (We can later make portrait/landscape selection by prompt intent.)
   return "1024x1024";
 }
 
@@ -105,9 +104,6 @@ async function generateBotImagePng(prompt: string): Promise<{
 }> {
   const { quality, model, reason } = chooseBotCatImageModel({ prompt });
 
-  // Use OpenAI image model (per TZ), not text model base64.
-  // NOTE: openai@6.x images.generate does NOT accept response_format.
-  // It returns base64 in result.data[0].b64_json by default.
   const result: any = await (openai as any).images.generate({
     model,
     prompt,
@@ -156,8 +152,6 @@ export async function POST(req: Request) {
     where: { chat_name: chatName },
     create: {
       chat_name: chatName,
-      // IMPORTANT: sessionId is NOT a User.id. user_id is a FK to User table.
-      // Stage 1 uses anonymous sessions, so keep user_id null.
       user_id: null,
       status: "active",
       send_to_internal: true,
@@ -207,7 +201,6 @@ export async function POST(req: Request) {
       mime_type: a.mimeType ?? null,
       file_size_bytes: a.fileSizeBytes ?? null,
       page_count: a.pageCount ?? null,
-      // Attachment model uses external_url, not original_url
       external_url: a.originalUrl ?? null,
       blob_url_original: a.blobUrlOriginal ?? null,
       blob_url_preview: a.blobUrlPreview ?? null,
@@ -222,7 +215,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // Embedding best-effort (Prisma schema expects vector+dims)
+  // Embedding best-effort
   let messageEmbedding: number[] | null = null;
   try {
     const embeddingModel = selectBotCatEmbeddingModel();
@@ -246,8 +239,6 @@ export async function POST(req: Request) {
       });
     }
   } catch (err: any) {
-    // Stage 1 TZ: embeddings are enabled for every user message.
-    // Chat must not fail, but we must log the error.
     try {
       await prisma.webhookLog.create({
         data: {
@@ -268,18 +259,16 @@ export async function POST(req: Request) {
         },
       });
     } catch {
-      // avoid cascading failures
+      // ignore
     }
   }
 
-  // Session summary update (per docs/spec_embedding_rag.md): every 3-5 messages.
-  // Best-effort, must not fail chat.
+  // Session summary update (best-effort)
   let sessionSummaryText = "";
   try {
     const res = await updateSessionSummaryIfNeeded({ chatName, everyNMessages: 4 });
     if (res.updated) sessionSummaryText = res.summary;
     else {
-      // If not updated, we can still read existing summary from meta
       const meta = (conversation.meta ?? {}) as any;
       if (typeof meta.sessionSummary === "string") sessionSummaryText = meta.sessionSummary;
     }
@@ -299,10 +288,10 @@ export async function POST(req: Request) {
   }
 
   const sessionSummaryBlock = sessionSummaryText
-    ? `[SESSION SUMMARY]\n${sessionSummaryText}\n[/SESSION SUMMARY]\n\n`
+    ? `[SESSION SUMMARY]\n${sessionSummaryText}\n[/SESSION SUMMARY]`
     : "";
 
-  // RAG retrieval (per spec_embedding_rag.md): if embedding missing, proceed without RAG.
+  // RAG retrieval (best-effort)
   let referenceContextBlock = "";
   if (messageEmbedding) {
     try {
@@ -330,7 +319,19 @@ export async function POST(req: Request) {
     }
   }
 
-  // Read history (simple)
+  const imageInstructionBlock =
+    "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
+    "[[GENERATE_IMAGE]]\n" +
+    "prompt: <one concise prompt describing the image to generate>\n" +
+    "[[/GENERATE_IMAGE]]";
+
+  const systemPrompt = buildBotCatSystemPrompt({
+    sessionSummaryBlock,
+    referenceContextBlock,
+    imageInstructionBlock,
+  });
+
+  // Read history
   const history = await prisma.message.findMany({
     where: { conversation_id: conversation.id },
     orderBy: { sequence: "asc" },
@@ -366,22 +367,6 @@ export async function POST(req: Request) {
   }
 
   const extractedBlock = buildExtractedDocumentsBlock(extractedDocuments);
-
-  const systemPrompt =
-    "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.\n\n" +
-    sessionSummaryBlock +
-    (referenceContextBlock ? `${referenceContextBlock}\n\n` : "") +
-    "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
-    "[[GENERATE_IMAGE]]\n" +
-    "prompt: <one concise prompt describing the image to generate>\n" +
-    "[[/GENERATE_IMAGE]]\n";
-
-  const extractedDocumentsChars = Array.isArray(extractedDocuments)
-    ? extractedDocuments.reduce((sum: number, d: any) => {
-        const t = typeof d?.text === "string" ? d.text : "";
-        return sum + t.length;
-      }, 0)
-    : 0;
 
   const { model, reason } = chooseBotCatModel({
     lastUserMessage: message,
@@ -489,7 +474,6 @@ export async function POST(req: Request) {
           });
           const nextSeq = (last?.sequence ?? 0) + 1;
 
-          // Generate image bytes using image model.
           const img = await generateBotImagePng(prompt);
 
           const uploaded = await put(
