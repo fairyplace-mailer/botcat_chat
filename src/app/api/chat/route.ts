@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 import type { BotCatAttachment } from "@/lib/botcat-attachment";
 import { chooseBotCatImageModel, chooseBotCatModel } from "@/lib/model-router";
 import { detectLanguageIso6391 } from "@/lib/language-detect";
+import {
+  formatReferenceContextBlock,
+  retrieveRelevantReferenceChunks,
+} from "@/server/rag/retrieval";
 
 const CONSENT_MARKER = "[[CONSENT_TRUE]]";
 
@@ -218,11 +222,13 @@ export async function POST(req: Request) {
   }
 
   // Embedding best-effort (Prisma schema expects vector+dims)
+  let messageEmbedding: number[] | null = null;
   try {
     const embeddingModel = selectBotCatEmbeddingModel();
     const emb = await openai.embeddings.create({ model: embeddingModel, input: message });
     const vec = emb.data?.[0]?.embedding;
     if (vec && Array.isArray(vec) && vec.length > 0) {
+      messageEmbedding = vec as number[];
       await prisma.messageEmbedding.upsert({
         where: { message_id: userMessageId },
         create: {
@@ -265,6 +271,34 @@ export async function POST(req: Request) {
     }
   }
 
+  // RAG retrieval (per spec_embedding_rag.md): if embedding missing, proceed without RAG.
+  let referenceContextBlock = "";
+  if (messageEmbedding) {
+    try {
+      const chunks = await retrieveRelevantReferenceChunks({
+        queryEmbedding: messageEmbedding,
+        topK: 5,
+      });
+      referenceContextBlock = formatReferenceContextBlock(chunks);
+    } catch (err: any) {
+      try {
+        await prisma.webhookLog.create({
+          data: {
+            conversation_id: conversation.id,
+            payload: {
+              type: "rag_retrieval_failed",
+              messageId: userMessageId,
+            },
+            status_code: 200,
+            error_message: String(err?.message ?? err),
+          },
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   // Read history (simple)
   const history = await prisma.message.findMany({
     where: { conversation_id: conversation.id },
@@ -304,6 +338,7 @@ export async function POST(req: Request) {
 
   const systemPrompt =
     "You are BotCat\u2122, a helpful FairyPlace\u2122 consultant. Answer concisely and ask clarifying questions when needed.\n\n" +
+    (referenceContextBlock ? `${referenceContextBlock}\n\n` : "") +
     "If you need to generate an image, emit ONLY the following block (no base64, no URLs):\n" +
     "[[GENERATE_IMAGE]]\n" +
     "prompt: <one concise prompt describing the image to generate>\n" +
