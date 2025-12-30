@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { selectBotCatTextModel } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 
@@ -74,7 +76,7 @@ export async function updateSessionSummaryIfNeeded(opts: {
     `Recent messages:\n${transcript}\n\n` +
     "Return updated summary (<= 500 tokens, concise).";
 
-  const resp = await prisma.$transaction(async (tx) => {
+  const resp = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // Use the same OpenAI client instance as the rest of the app.
     const { openai } = await import("@/lib/openai");
     return openai.chat.completions.create({
