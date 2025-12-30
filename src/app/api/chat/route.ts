@@ -191,6 +191,15 @@ export async function POST(req: Request) {
     },
   });
 
+  // Keep message_count in sync (used by session summary trigger)
+  await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: {
+      message_count: { increment: 1 },
+      last_activity_at: now,
+    },
+  });
+
   // Attachments (best-effort)
   if (attachments.length > 0) {
     const attachmentRows = attachments.map((a) => ({
@@ -501,6 +510,15 @@ export async function POST(req: Request) {
             },
           });
 
+          // Increment message_count for bot message
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              message_count: { increment: 1 },
+              last_activity_at: new Date(),
+            },
+          });
+
           await prisma.attachment.create({
             data: {
               id: attachmentId,
@@ -546,6 +564,37 @@ export async function POST(req: Request) {
           controller.close();
           return;
         }
+
+        const lastSeq = await prisma.message.findFirst({
+          where: { conversation_id: conversation.id },
+          orderBy: { sequence: "desc" },
+          select: { sequence: true },
+        });
+        const nextSeq = (lastSeq?.sequence ?? 0) + 1;
+
+        await prisma.message.create({
+          data: {
+            conversation_id: conversation.id,
+            message_id: buildMessageId("b"),
+            role: "BotCat",
+            content_original_md: assistantText,
+            content_translated_md: null,
+            has_attachments: false,
+            has_links: false,
+            is_voice: false,
+            created_at: new Date(),
+            sequence: nextSeq,
+          },
+        });
+
+        // Increment message_count for bot message
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            message_count: { increment: 1 },
+            last_activity_at: new Date(),
+          },
+        });
 
         controller.enqueue(enc.encode(sse("final", { reply: assistantText })));
         controller.close();
