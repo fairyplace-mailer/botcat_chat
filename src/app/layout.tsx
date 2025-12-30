@@ -13,10 +13,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BotCat3 Consultant by FairyPlace3",
+  title: "BotCat™ Consultant by FairyPlace™",
   description:
-    "BotCat3 by FairyPlace3 helps you create bespoke surface designs for fabric, wallpaper, and leather.",
+    "BotCat™ by FairyPlace™ helps you create bespoke surface designs for fabric, wallpaper, and leather.",
   manifest: "/manifest.webmanifest",
+  icons: {
+    apple: "/BotCat_Portrait_180.png",
+  },
 };
 
 export default function RootLayout({
