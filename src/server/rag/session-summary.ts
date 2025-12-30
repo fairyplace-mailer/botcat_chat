@@ -1,4 +1,4 @@
-import { openai } from "@/lib/openai";
+import { selectBotCatTextModel } from "@/lib/openai";
 import { prisma } from "@/lib/prisma";
 
 const DEFAULT_EVERY_N_MESSAGES = 4;
@@ -74,12 +74,16 @@ export async function updateSessionSummaryIfNeeded(opts: {
     `Recent messages:\n${transcript}\n\n` +
     "Return updated summary (<= 500 tokens, concise).";
 
-  const resp = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL_CHAT_STRONG ?? process.env.OPENAI_MODEL_CHAT ?? "gpt-4o-mini",
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
+  const resp = await prisma.$transaction(async (tx) => {
+    // Use the same OpenAI client instance as the rest of the app.
+    const { openai } = await import("@/lib/openai");
+    return openai.chat.completions.create({
+      model: selectBotCatTextModel("chat_strong"),
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    });
   });
 
   const summary = clampSummary(resp.choices?.[0]?.message?.content ?? "");
