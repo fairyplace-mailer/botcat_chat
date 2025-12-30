@@ -89,6 +89,40 @@ model MessageEmbedding {
   @@index([created_at])
 }
 
+// RAG knowledge base
+model ReferenceDoc {
+  id         String   @id @default(uuid())
+  source_path String  @unique
+  title      String?
+  source_hash String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  chunks ReferenceChunk[]
+
+  @@index([created_at])
+}
+
+model ReferenceChunk {
+  id              String   @id @default(uuid())
+  doc_id          String
+  chunk_index     Int
+  content_md      String
+  token_estimate  Int?
+
+  embedding_model String
+  vector          Json
+  dims            Int
+
+  created_at      DateTime @default(now())
+
+  doc ReferenceDoc @relation(fields: [doc_id], references: [id], onDelete: Cascade)
+
+  @@unique([doc_id, chunk_index])
+  @@index([doc_id])
+  @@index([created_at])
+}
+
 model Attachment {
   id                String         @id @default(uuid())
   conversation_id   String

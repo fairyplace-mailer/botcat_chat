@@ -29,4 +29,7 @@ export const env = {
 
   // Секрет вебхука BotCat → backend
   BOTCAT_WEBHOOK_SECRET: process.env.BOTCAT_WEBHOOK_SECRET ?? "",
+
+  // Admin token for protected internal endpoints (manual maintenance tasks)
+  ADMIN_TOKEN: process.env.ADMIN_TOKEN ?? "",
 };
