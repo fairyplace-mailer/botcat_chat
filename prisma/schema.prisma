@@ -23,6 +23,16 @@ enum EmailStatus {
   failed
 }
 
+enum SiteType {
+  wix
+  external
+}
+
+enum ContentSource {
+  cms
+  page
+}
+
 model User {
   id            String         @id @default(uuid())
   email         String?        @unique
@@ -91,12 +101,12 @@ model MessageEmbedding {
 
 // RAG knowledge base
 model ReferenceDoc {
-  id         String   @id @default(uuid())
+  id          String   @id @default(uuid())
   source_path String  @unique
-  title      String?
+  title       String?
   source_hash String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   chunks ReferenceChunk[]
 
@@ -104,23 +114,92 @@ model ReferenceDoc {
 }
 
 model ReferenceChunk {
-  id              String   @id @default(uuid())
-  doc_id          String
-  chunk_index     Int
-  content_md      String
-  token_estimate  Int?
+  id             String   @id @default(uuid())
+  doc_id         String
+  chunk_index    Int
+  content_md     String
+  token_estimate Int?
 
   embedding_model String
   vector          Json
   dims            Int
 
-  created_at      DateTime @default(now())
+  created_at DateTime @default(now())
 
   doc ReferenceDoc @relation(fields: [doc_id], references: [id], onDelete: Cascade)
 
   @@unique([doc_id, chunk_index])
   @@index([doc_id])
   @@index([created_at])
+}
+
+// Hybrid content sources (Wix CMS + HTML crawl)
+model Site {
+  id               String   @id @default(uuid())
+  name             String
+  domain           String   @unique
+  type             SiteType
+  wix_site_id      String?
+  wix_instance_id  String?
+  primary_language String   @default("en")
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  pages Page[]
+
+  @@index([type])
+  @@index([created_at])
+}
+
+model Page {
+  id         String        @id @default(uuid())
+  site_id    String
+  url        String
+  title      String?
+  source     ContentSource
+  fetched_at DateTime?
+  created_at DateTime      @default(now())
+  updated_at DateTime      @updatedAt
+
+  site     Site      @relation(fields: [site_id], references: [id], onDelete: Cascade)
+  sections Section[]
+  images   Image[]
+
+  @@unique([site_id, url])
+  @@index([site_id, fetched_at])
+  @@index([created_at])
+}
+
+model Section {
+  id              String        @id @default(uuid())
+  page_id         String
+  content         String
+  content_hash    String
+  source          ContentSource
+
+  embedding_model String?
+  vector          Json?
+  dims            Int?
+
+  created_at      DateTime      @default(now())
+
+  page Page @relation(fields: [page_id], references: [id], onDelete: Cascade)
+
+  @@unique([page_id, content_hash])
+  @@index([page_id])
+  @@index([created_at])
+}
+
+model Image {
+  id       String        @id @default(uuid())
+  page_id  String
+  url      String
+  alt_text String?
+  source   ContentSource
+
+  page Page @relation(fields: [page_id], references: [id], onDelete: Cascade)
+
+  @@index([page_id])
 }
 
 model Attachment {
@@ -179,18 +258,18 @@ model WebhookLog {
 }
 
 model DailyStats {
-  date                   DateTime
-  channel                String   @default("web")
-  total_conversations    Int      @default(0)
-  total_messages         Int      @default(0)
-  total_attachments      Int      @default(0)
-  total_emails_sent      Int      @default(0)
-  total_tokens_prompt    BigInt   @default(0)
-  total_tokens_completion BigInt  @default(0)
-  total_tokens_total     BigInt   @default(0)
-  total_uploaded_bytes   BigInt   @default(0)
-  total_blob_files       Int      @default(0)
-  created_at             DateTime @default(now())
+  date                    DateTime
+  channel                 String   @default("web")
+  total_conversations     Int      @default(0)
+  total_messages          Int      @default(0)
+  total_attachments       Int      @default(0)
+  total_emails_sent       Int      @default(0)
+  total_tokens_prompt     BigInt   @default(0)
+  total_tokens_completion BigInt   @default(0)
+  total_tokens_total      BigInt   @default(0)
+  total_uploaded_bytes    BigInt   @default(0)
+  total_blob_files        Int      @default(0)
+  created_at              DateTime @default(now())
 
   @@id([date, channel])
   @@index([date])
