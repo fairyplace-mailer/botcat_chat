@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import { marked } from "marked";
 
 const USER_AGENT = "BotCat/1.0 (+https://www.fairyplace.biz)";
+const FETCH_TIMEOUT_MS = 20_000;
 
 function sha256(text: string): string {
   return crypto.createHash("sha256").update(text).digest("hex");
@@ -22,14 +23,15 @@ function normalizeWhitespace(text: string): string {
 
 function stripHtmlToText(html: string): string {
   // Very simple & robust extraction without DOM dependencies.
-  // 1) Remove script/style/svg
+  // 1) Remove script/style/svg/noscript
   let s = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ");
+    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
 
   // 2) Convert some block tags to newlines
-  s = s.replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr)>/gi, "\n");
+  s = s.replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr|\/section|\/article)>/gi, "\n");
 
   // 3) Drop remaining tags
   s = s.replace(/<[^>]+>/g, " ");
@@ -77,7 +79,10 @@ function extractLinks(baseUrl: URL, html: string): URL[] {
   return urls;
 }
 
-function extractImages(baseUrl: URL, html: string): Array<{ url: URL; alt: string | null }> {
+function extractImages(
+  baseUrl: URL,
+  html: string
+): Array<{ url: URL; alt: string | null }> {
   const imgs: Array<{ url: URL; alt: string | null }> = [];
   const re = /<img\b[^>]*>/gi;
   const srcRe = /\ssrc\s*=\s*(["'])(.*?)\1/i;
@@ -104,19 +109,32 @@ function extractImages(baseUrl: URL, html: string): Array<{ url: URL; alt: strin
   return imgs;
 }
 
-async function fetchText(url: URL): Promise<{ ok: boolean; status: number; text: string; contentType: string }>{
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml",
-    },
-    redirect: "follow",
-  });
+async function fetchText(url: URL): Promise<{
+  ok: boolean;
+  status: number;
+  text: string;
+  contentType: string;
+}> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  const contentType = res.headers.get("content-type") ?? "";
-  const text = await res.text();
-  return { ok: res.ok, status: res.status, text, contentType };
+  try {
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    const contentType = res.headers.get("content-type") ?? "";
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, text, contentType };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function isHtmlContentType(contentType: string): boolean {
@@ -124,12 +142,102 @@ function isHtmlContentType(contentType: string): boolean {
   return ct.includes("text/html") || ct.includes("application/xhtml+xml");
 }
 
+function urlPathnameForRobots(url: URL): string {
+  const p = url.pathname || "/";
+  return url.search ? `${p}${url.search}` : p;
+}
+
+function parseRobotsTxtDisallow(robotsTxt: string): string[] {
+  // Minimal robots parser:
+  // - read blocks for "User-agent: *" and also for "User-agent: BotCat"
+  // - collect Disallow rules from those blocks
+  // - ignore Allow/Crawl-delay/etc.
+  const lines = robotsTxt
+    .split(/\r?\n/)
+    .map((l) => l.split("#")[0].trim())
+    .filter(Boolean);
+
+  const disallow: string[] = [];
+
+  let active = false;
+  let seenRelevantUa = false;
+
+  for (const line of lines) {
+    const m = line.match(/^(user-agent|disallow)\s*:\s*(.*)$/i);
+    if (!m) continue;
+
+    const key = m[1].toLowerCase();
+    const value = (m[2] ?? "").trim();
+
+    if (key === "user-agent") {
+      // Start of a new UA line. In robots.txt blocks UA lines can repeat.
+      const ua = value.toLowerCase();
+      active = ua === "*" || ua === "botcat";
+      if (active) seenRelevantUa = true;
+      continue;
+    }
+
+    if (key === "disallow" && active) {
+      // Empty Disallow means allow all.
+      if (!value) continue;
+      disallow.push(value);
+    }
+  }
+
+  // If file exists but had no relevant UA, be conservative and treat as allow all.
+  if (!seenRelevantUa) return [];
+
+  return disallow;
+}
+
+function isAllowedByRobots(params: {
+  url: URL;
+  disallowRules: string[];
+}): boolean {
+  const path = urlPathnameForRobots(params.url);
+
+  for (const rule of params.disallowRules) {
+    // Support the common simple prefix semantics.
+    // Ignore wildcards for now.
+    if (rule === "/") return false;
+    if (path.startsWith(rule)) return false;
+  }
+
+  return true;
+}
+
+async function getRobotsDisallowForDomain(domain: string): Promise<string[]> {
+  // Cache per-process in memory. Enough for cron job.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const g = globalThis as any;
+  g.__botcatRobotsCache = g.__botcatRobotsCache ?? new Map<string, string[]>();
+  const cache: Map<string, string[]> = g.__botcatRobotsCache;
+
+  const cached = cache.get(domain);
+  if (cached) return cached;
+
+  try {
+    const url = new URL(`https://${domain}/robots.txt`);
+    const res = await fetchText(url);
+    if (!res.ok) {
+      cache.set(domain, []);
+      return [];
+    }
+    const rules = parseRobotsTxtDisallow(res.text);
+    cache.set(domain, rules);
+    return rules;
+  } catch {
+    cache.set(domain, []);
+    return [];
+  }
+}
+
 async function upsertSite(params: {
   domain: string;
   name: string;
   type: SiteType;
   primaryLanguage: string;
-}): Promise<{ id: string }>{
+}): Promise<{ id: string }> {
   return prisma.site.upsert({
     where: { domain: params.domain },
     create: {
@@ -147,7 +255,10 @@ async function upsertSite(params: {
   });
 }
 
-function shouldSkipByFetchedAt(fetchedAt: Date | null | undefined, now: Date): boolean {
+function shouldSkipByFetchedAt(
+  fetchedAt: Date | null | undefined,
+  now: Date
+): boolean {
   if (!fetchedAt) return false;
   const ageMs = now.getTime() - fetchedAt.getTime();
   return ageMs < 24 * 60 * 60 * 1000;
@@ -182,8 +293,11 @@ async function writeSectionsWithEmbeddings(params: {
   pageId: string;
   source: ContentSource;
   markdownText: string;
-}): Promise<{ sectionsWritten: number }>{
-  const chunks = chunkMarkdownByHeadings(params.markdownText, { maxChars: 2400, minChars: 200 });
+}): Promise<{ sectionsWritten: number }> {
+  const chunks = chunkMarkdownByHeadings(params.markdownText, {
+    maxChars: 2400,
+    minChars: 200,
+  });
   const embeddingModel = selectBotCatEmbeddingModel();
 
   let sectionsWritten = 0;
@@ -194,8 +308,10 @@ async function writeSectionsWithEmbeddings(params: {
 
     const contentHash = sha256(content);
 
-    // Create embedding
-    const emb = await openai.embeddings.create({ model: embeddingModel, input: content });
+    const emb = await openai.embeddings.create({
+      model: embeddingModel,
+      input: content,
+    });
     const vector = emb.data?.[0]?.embedding;
     if (!Array.isArray(vector)) {
       throw new Error("Embedding response missing embedding[]");
@@ -209,6 +325,7 @@ async function writeSectionsWithEmbeddings(params: {
         content_hash: contentHash,
         source: params.source,
         embedding_model: embeddingModel,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         vector: vector as any,
         dims: vector.length,
       },
@@ -216,6 +333,7 @@ async function writeSectionsWithEmbeddings(params: {
         content,
         source: params.source,
         embedding_model: embeddingModel,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         vector: vector as any,
         dims: vector.length,
       },
@@ -231,10 +349,9 @@ async function writeImages(params: {
   pageId: string;
   source: ContentSource;
   images: Array<{ url: URL; alt: string | null }>;
-}): Promise<{ imagesWritten: number }>{
+}): Promise<{ imagesWritten: number }> {
   if (!params.images.length) return { imagesWritten: 0 };
 
-  // Keep it simple: delete and recreate for this page.
   await prisma.image.deleteMany({ where: { page_id: params.pageId } });
 
   await prisma.image.createMany({
@@ -249,13 +366,14 @@ async function writeImages(params: {
   return { imagesWritten: params.images.length };
 }
 
-function htmlToMarkdownText(html: string): string {
-  // We only need a stable text representation.
-  // Use marked to normalize (markdown-ish) once we have plain text.
+function htmlToMarkdownText(html: string, title: string | null): string {
+  // Basic structure: prepend title as H1 if present.
+  // Keep the conversion stable and avoid DOM.
   const text = stripHtmlToText(html);
-  // Wrap as markdown paragraph.
-  // (marked is already dependency; keeps format consistent with other md blocks in system.)
-  return String(marked.parseInline(text)).trim() || text;
+  const body = String(marked.parseInline(text)).trim() || text;
+
+  if (title) return `# ${title}\n\n${body}`;
+  return body;
 }
 
 export async function crawlWebSources(params?: {
@@ -267,6 +385,9 @@ export async function crawlWebSources(params?: {
   pagesFetched: number;
   pagesSkipped24h: number;
   pagesIgnoredByRules: number;
+  pagesDisallowedByRobots: number;
+  pagesNonHtml: number;
+  pagesFailedFetch: number;
   sectionsWritten: number;
   imagesWritten: number;
 }> {
@@ -277,6 +398,9 @@ export async function crawlWebSources(params?: {
   let pagesFetched = 0;
   let pagesSkipped24h = 0;
   let pagesIgnoredByRules = 0;
+  let pagesDisallowedByRobots = 0;
+  let pagesNonHtml = 0;
+  let pagesFailedFetch = 0;
   let sectionsWritten = 0;
   let imagesWritten = 0;
 
@@ -287,6 +411,8 @@ export async function crawlWebSources(params?: {
       type: source.type,
       primaryLanguage: source.primaryLanguage,
     });
+
+    const robotsDisallow = await getRobotsDisallowForDomain(source.domain);
 
     const queue: URL[] = [];
     const seen = new Set<string>();
@@ -313,7 +439,11 @@ export async function crawlWebSources(params?: {
         continue;
       }
 
-      // 24h guard: if we have this page and it's fresh, skip fetching
+      if (!isAllowedByRobots({ url, disallowRules: robotsDisallow })) {
+        pagesDisallowedByRobots++;
+        continue;
+      }
+
       const existing = await prisma.page.findUnique({
         where: { site_id_url: { site_id: site.id, url: key } },
         select: { fetched_at: true, id: true },
@@ -324,9 +454,24 @@ export async function crawlWebSources(params?: {
         continue;
       }
 
-      const res = await fetchText(url);
-      if (!res.ok) continue;
-      if (!isHtmlContentType(res.contentType)) continue;
+      let res:
+        | { ok: boolean; status: number; text: string; contentType: string }
+        | undefined;
+      try {
+        res = await fetchText(url);
+      } catch {
+        pagesFailedFetch++;
+        continue;
+      }
+
+      if (!res.ok) {
+        pagesFailedFetch++;
+        continue;
+      }
+      if (!isHtmlContentType(res.contentType)) {
+        pagesNonHtml++;
+        continue;
+      }
 
       pagesFetched++;
 
@@ -340,10 +485,9 @@ export async function crawlWebSources(params?: {
         fetchedAt: now,
       });
 
-      // Replace sections for this page: easiest way to keep consistent.
       await prisma.section.deleteMany({ where: { page_id: page.id } });
 
-      const md = htmlToMarkdownText(res.text);
+      const md = htmlToMarkdownText(res.text, title);
       const writeSec = await writeSectionsWithEmbeddings({
         pageId: page.id,
         source: source.source,
@@ -352,14 +496,18 @@ export async function crawlWebSources(params?: {
       sectionsWritten += writeSec.sectionsWritten;
 
       const imgs = extractImages(url, res.text);
-      const writeImg = await writeImages({ pageId: page.id, source: source.source, images: imgs });
+      const writeImg = await writeImages({
+        pageId: page.id,
+        source: source.source,
+        images: imgs,
+      });
       imagesWritten += writeImg.imagesWritten;
 
-      // Enqueue new links (still constrained by prefix rules)
       const links = extractLinks(url, res.text);
       for (const l of links) {
         if (l.hostname !== source.domain) continue;
         if (!isAllowedUrlForSource(l, source)) continue;
+        if (!isAllowedByRobots({ url: l, disallowRules: robotsDisallow })) continue;
         queue.push(l);
       }
     }
@@ -371,6 +519,9 @@ export async function crawlWebSources(params?: {
     pagesFetched,
     pagesSkipped24h,
     pagesIgnoredByRules,
+    pagesDisallowedByRobots,
+    pagesNonHtml,
+    pagesFailedFetch,
     sectionsWritten,
     imagesWritten,
   };
