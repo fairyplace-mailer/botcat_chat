@@ -23,6 +23,16 @@ enum EmailStatus {
   failed
 }
 
+enum SiteType {
+  wix
+  external
+}
+
+enum ContentSource {
+  cms
+  page
+}
+
 model User {
   id            String         @id @default(uuid())
   email         String?        @unique
@@ -91,12 +101,12 @@ model MessageEmbedding {
 
 // RAG knowledge base
 model ReferenceDoc {
-  id         String   @id @default(uuid())
-  source_path String  @unique
-  title      String?
+  id          String   @id @default(uuid())
+  source_path String   @unique
+  title       String?
   source_hash String
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
 
   chunks ReferenceChunk[]
 
@@ -121,6 +131,78 @@ model ReferenceChunk {
   @@unique([doc_id, chunk_index])
   @@index([doc_id])
   @@index([created_at])
+}
+
+// Hybrid web knowledge base (docs/wix_spec.md)
+model Site {
+  id              String   @id @default(uuid())
+  name            String
+  domain          String   @unique
+  type            SiteType
+  wixSiteId       String?
+  wixInstanceId   String?
+  primaryLanguage String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pages           Page[]
+}
+
+model Page {
+  id        String   @id @default(uuid())
+  siteId    String
+  url       String
+  title     String?
+  source    ContentSource
+  fetchedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // crawler bookkeeping
+  canonicalUrl   String?
+  httpStatus     Int?
+  excludedReason String?
+
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  sections  Section[]
+  images    Image[]
+
+  @@unique([siteId, url])
+  @@index([siteId])
+  @@index([fetchedAt])
+}
+
+model Section {
+  id          String        @id @default(uuid())
+  pageId      String
+  content     String
+  contentHash String
+
+  // Use current project style (Json vectors), not Bytes.
+  embedding_model String?
+  vector          Json?
+  dims            Int?
+
+  source      ContentSource
+  createdAt   DateTime @default(now())
+
+  page        Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, contentHash])
+  @@index([pageId])
+  @@index([createdAt])
+}
+
+model Image {
+  id        String        @id @default(uuid())
+  pageId    String
+  url       String
+  altText   String?
+  source    ContentSource
+
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId])
 }
 
 model Attachment {
@@ -179,18 +261,18 @@ model WebhookLog {
 }
 
 model DailyStats {
-  date                   DateTime
-  channel                String   @default("web")
-  total_conversations    Int      @default(0)
-  total_messages         Int      @default(0)
-  total_attachments      Int      @default(0)
-  total_emails_sent      Int      @default(0)
-  total_tokens_prompt    BigInt   @default(0)
-  total_tokens_completion BigInt  @default(0)
-  total_tokens_total     BigInt   @default(0)
-  total_uploaded_bytes   BigInt   @default(0)
-  total_blob_files       Int      @default(0)
-  created_at             DateTime @default(now())
+  date                    DateTime
+  channel                 String   @default("web")
+  total_conversations     Int      @default(0)
+  total_messages          Int      @default(0)
+  total_attachments       Int      @default(0)
+  total_emails_sent       Int      @default(0)
+  total_tokens_prompt     BigInt   @default(0)
+  total_tokens_completion BigInt   @default(0)
+  total_tokens_total      BigInt   @default(0)
+  total_uploaded_bytes    BigInt   @default(0)
+  total_blob_files        Int      @default(0)
+  created_at              DateTime @default(now())
 
   @@id([date, channel])
   @@index([date])
