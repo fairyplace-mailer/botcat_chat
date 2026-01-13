@@ -21,6 +21,39 @@ function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function normalizeUrlForKey(input: URL): URL {
+  const u = new URL(input.toString());
+  u.hash = "";
+
+  // Drop common tracking params
+  const dropPrefixes = ["utm_"];
+  const dropExact = new Set([
+    "gclid",
+    "fbclid",
+    "msclkid",
+    "yclid",
+    "mc_cid",
+    "mc_eid",
+  ]);
+
+  const next = new URL(u.toString());
+  next.searchParams.forEach((_, k) => {
+    const kl = k.toLowerCase();
+    if (dropExact.has(kl) || dropPrefixes.some((p) => kl.startsWith(p))) {
+      next.searchParams.delete(k);
+    }
+  });
+
+  // Canonicalize: sort params for stable key
+  const entries = Array.from(next.searchParams.entries()).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+  next.search = "";
+  for (const [k, v] of entries) next.searchParams.append(k, v);
+
+  return next;
+}
+
 function stripHtmlToText(html: string): string {
   // Very simple & robust extraction without DOM dependencies.
   // 1) Remove script/style/svg/noscript
@@ -55,6 +88,36 @@ function extractTitle(html: string): string | null {
   return normalizeWhitespace(stripHtmlToText(m[1]));
 }
 
+function extractMainContentHtml(html: string): string {
+  // Heuristic extraction without DOM:
+  // 1) Try <main> ... </main>
+  // 2) Else try <article>
+  // 3) Else choose the largest <section>
+  // 4) Else fall back to full html
+  const tryTag = (tag: string): string | null => {
+    const re = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+    const m = html.match(re);
+    return m?.[1] ? String(m[1]) : null;
+  };
+
+  const main = tryTag("main");
+  if (main && main.length > 200) return main;
+
+  const article = tryTag("article");
+  if (article && article.length > 200) return article;
+
+  const sectionRe = /<section\b[^>]*>([\s\S]*?)<\/section>/gi;
+  let best: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = sectionRe.exec(html))) {
+    const body = m[1] ?? "";
+    if (!best || body.length > best.length) best = body;
+  }
+  if (best && best.length > 200) return best;
+
+  return html;
+}
+
 function extractLinks(baseUrl: URL, html: string): URL[] {
   const urls: URL[] = [];
   const re = /href\s*=\s*(["'])(.*?)\1/gi;
@@ -69,9 +132,7 @@ function extractLinks(baseUrl: URL, html: string): URL[] {
 
     try {
       const u = new URL(raw, baseUrl);
-      // Drop hash
-      u.hash = "";
-      urls.push(u);
+      urls.push(normalizeUrlForKey(u));
     } catch {
       // ignore
     }
@@ -98,10 +159,10 @@ function extractImages(
 
     try {
       const u = new URL(rawSrc, baseUrl);
-      u.hash = "";
+      const normalized = normalizeUrlForKey(u);
       const altM = tag.match(altRe);
       const alt = altM ? normalizeWhitespace(stripHtmlToText(altM[2] ?? "")) : null;
-      imgs.push({ url: u, alt });
+      imgs.push({ url: normalized, alt });
     } catch {
       // ignore
     }
@@ -369,7 +430,8 @@ async function writeImages(params: {
 function htmlToMarkdownText(html: string, title: string | null): string {
   // Basic structure: prepend title as H1 if present.
   // Keep the conversion stable and avoid DOM.
-  const text = stripHtmlToText(html);
+  const mainHtml = extractMainContentHtml(html);
+  const text = stripHtmlToText(mainHtml);
   const body = String(marked.parseInline(text)).trim() || text;
 
   if (title) return `# ${title}\n\n${body}`;
@@ -419,8 +481,7 @@ export async function crawlWebSources(params?: {
 
     for (const u of source.startUrls) {
       try {
-        const url = new URL(u);
-        url.hash = "";
+        const url = normalizeUrlForKey(new URL(u));
         queue.push(url);
       } catch {
         // ignore
@@ -429,17 +490,18 @@ export async function crawlWebSources(params?: {
 
     while (queue.length > 0 && seen.size < source.maxPagesPerRun) {
       const url = queue.shift()!;
-      const key = url.toString();
+      const normalizedUrl = normalizeUrlForKey(url);
+      const key = normalizedUrl.toString();
       if (seen.has(key)) continue;
       seen.add(key);
       pagesVisited++;
 
-      if (!isAllowedUrlForSource(url, source)) {
+      if (!isAllowedUrlForSource(normalizedUrl, source)) {
         pagesIgnoredByRules++;
         continue;
       }
 
-      if (!isAllowedByRobots({ url, disallowRules: robotsDisallow })) {
+      if (!isAllowedByRobots({ url: normalizedUrl, disallowRules: robotsDisallow })) {
         pagesDisallowedByRobots++;
         continue;
       }
@@ -458,7 +520,7 @@ export async function crawlWebSources(params?: {
         | { ok: boolean; status: number; text: string; contentType: string }
         | undefined;
       try {
-        res = await fetchText(url);
+        res = await fetchText(normalizedUrl);
       } catch {
         pagesFailedFetch++;
         continue;
@@ -495,7 +557,7 @@ export async function crawlWebSources(params?: {
       });
       sectionsWritten += writeSec.sectionsWritten;
 
-      const imgs = extractImages(url, res.text);
+      const imgs = extractImages(normalizedUrl, res.text);
       const writeImg = await writeImages({
         pageId: page.id,
         source: source.source,
@@ -503,7 +565,7 @@ export async function crawlWebSources(params?: {
       });
       imagesWritten += writeImg.imagesWritten;
 
-      const links = extractLinks(url, res.text);
+      const links = extractLinks(normalizedUrl, res.text);
       for (const l of links) {
         if (l.hostname !== source.domain) continue;
         if (!isAllowedUrlForSource(l, source)) continue;
