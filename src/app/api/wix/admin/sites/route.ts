@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     count: sites.length,
-    sites: sites.map((s) => ({
+    sites: sites.map((s: (typeof sites)[number]) => ({
       ...s,
       wix_site_id: mask(s.wix_site_id),
       wix_instance_id: mask(s.wix_instance_id),
