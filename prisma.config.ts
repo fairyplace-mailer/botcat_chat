@@ -4,7 +4,10 @@ import { defineConfig, env } from "prisma/config";
 export default defineConfig({
   schema: "./prisma/schema.prisma",
   datasource: {
-    // один datasource, url берём из переменной окружения
     url: env("DATABASE_URL"),
+  },
+  migrate: {
+    datasourceUrl: env("DATABASE_URL"),
+    shadowDatabaseUrl: env("SHADOW_DATABASE_URL"),
   },
 });
