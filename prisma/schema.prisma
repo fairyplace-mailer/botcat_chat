@@ -114,17 +114,17 @@ model ReferenceDoc {
 }
 
 model ReferenceChunk {
-  id              String   @id @default(uuid())
-  doc_id          String
-  chunk_index     Int
-  content_md      String
-  token_estimate  Int?
+  id             String   @id @default(uuid())
+  doc_id         String
+  chunk_index    Int
+  content_md     String
+  token_estimate Int?
 
   embedding_model String
   vector          Json
   dims            Int
 
-  created_at      DateTime @default(now())
+  created_at DateTime @default(now())
 
   doc ReferenceDoc @relation(fields: [doc_id], references: [id], onDelete: Cascade)
 
@@ -133,76 +133,96 @@ model ReferenceChunk {
   @@index([created_at])
 }
 
-// Hybrid web knowledge base (docs/wix_spec.md)
+// Hybrid content sources (Wix CMS + HTML crawl)
 model Site {
-  id              String   @id @default(uuid())
-  name            String
-  domain          String   @unique
-  type            SiteType
-  wixSiteId       String?
-  wixInstanceId   String?
-  primaryLanguage String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(uuid())
+  name             String
+  domain           String   @unique
+  type             SiteType
 
-  pages           Page[]
+  // Wix install identifiers (from /api/wix/install)
+  wix_site_id      String?
+  wix_instance_id  String?
+
+  // Optional metadata blob (kept flexible per user request)
+  meta             Json?
+
+  primary_language String   @default("en")
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  pages Page[]
+  wix_token WixAuthToken?
+
+  @@index([type])
+  @@index([created_at])
+}
+
+model WixAuthToken {
+  site_id     String   @id
+  access_token String
+  expires_at   DateTime
+  updated_at   DateTime @updatedAt
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@index([expires_at])
 }
 
 model Page {
-  id        String   @id @default(uuid())
-  siteId    String
-  url       String
-  title     String?
-  source    ContentSource
-  fetchedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  id         String        @id @default(uuid())
+  site_id    String
+  url        String
+  title      String?
+  source     ContentSource
+  fetched_at DateTime?
   // crawler bookkeeping
-  canonicalUrl   String?
-  httpStatus     Int?
-  excludedReason String?
+  canonical_url   String?
+  http_status     Int?
+  excluded_reason String?
+  created_at DateTime      @default(now())
+  updated_at DateTime      @updatedAt
 
-  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  sections  Section[]
-  images    Image[]
+  site     Site      @relation(fields: [site_id], references: [id], onDelete: Cascade)
+  sections Section[]
+  images   Image[]
 
-  @@unique([siteId, url])
-  @@index([siteId])
-  @@index([fetchedAt])
+  @@unique([site_id, url])
+  @@index([site_id, fetched_at])
+  @@index([site_id, http_status])
+  @@index([created_at])
 }
 
 model Section {
-  id          String        @id @default(uuid())
-  pageId      String
-  content     String
-  contentHash String
+  id              String        @id @default(uuid())
+  page_id         String
+  content         String
+  content_hash    String
+  source          ContentSource
 
-  // Use current project style (Json vectors), not Bytes.
   embedding_model String?
   vector          Json?
   dims            Int?
 
-  source      ContentSource
-  createdAt   DateTime @default(now())
+  created_at      DateTime      @default(now())
 
-  page        Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  page Page @relation(fields: [page_id], references: [id], onDelete: Cascade)
 
-  @@unique([pageId, contentHash])
-  @@index([pageId])
-  @@index([createdAt])
+  @@unique([page_id, content_hash])
+  @@index([page_id])
+  @@index([created_at])
 }
 
 model Image {
-  id        String        @id @default(uuid())
-  pageId    String
-  url       String
-  altText   String?
-  source    ContentSource
+  id       String        @id @default(uuid())
+  page_id  String
+  url      String
+  alt_text String?
+  source   ContentSource
 
-  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  page Page @relation(fields: [page_id], references: [id], onDelete: Cascade)
 
-  @@index([pageId])
+  @@index([page_id])
 }
 
 model Attachment {
