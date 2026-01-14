@@ -139,16 +139,34 @@ model Site {
   name             String
   domain           String   @unique
   type             SiteType
+
+  // Wix install identifiers (from /api/wix/install)
   wix_site_id      String?
   wix_instance_id  String?
+
+  // Optional metadata blob (kept flexible per user request)
+  meta             Json?
+
   primary_language String   @default("en")
   created_at       DateTime @default(now())
   updated_at       DateTime @updatedAt
 
   pages Page[]
+  wix_token WixAuthToken?
 
   @@index([type])
   @@index([created_at])
+}
+
+model WixAuthToken {
+  site_id     String   @id
+  access_token String
+  expires_at   DateTime
+  updated_at   DateTime @updatedAt
+
+  site Site @relation(fields: [site_id], references: [id], onDelete: Cascade)
+
+  @@index([expires_at])
 }
 
 model Page {
