@@ -36,4 +36,7 @@ export const env = {
   // Wix App OAuth (instance → access token exchange)
   WIX_APP_ID: process.env.WIX_APP_ID ?? "",
   WIX_APP_SECRET: process.env.WIX_APP_SECRET ?? "",
+
+  // Wix debugging/admin endpoints (do NOT expose publicly)
+  WIX_ADMIN_TOKEN: process.env.WIX_ADMIN_TOKEN ?? "",
 };
