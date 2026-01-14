@@ -1,13 +1,12 @@
-import "dotenv/config";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
+import { env } from "process";
 
 export default defineConfig({
-  schema: "./prisma/schema.prisma",
-  datasource: {
-    url: env("DATABASE_URL"),
-  },
+  schema: "prisma/schema.prisma",
   migrate: {
-    datasourceUrl: env("DATABASE_URL"),
-    shadowDatabaseUrl: env("SHADOW_DATABASE_URL"),
+    datasourceUrl: env.DATABASE_URL,
+    ...(process.env.SHADOW_DATABASE_URL
+      ? { shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL }
+      : {}),
   },
 });
