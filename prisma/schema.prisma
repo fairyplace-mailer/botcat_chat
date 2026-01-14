@@ -102,7 +102,7 @@ model MessageEmbedding {
 // RAG knowledge base
 model ReferenceDoc {
   id          String   @id @default(uuid())
-  source_path String  @unique
+  source_path String   @unique
   title       String?
   source_hash String
   created_at  DateTime @default(now())
@@ -176,6 +176,10 @@ model Page {
   title      String?
   source     ContentSource
   fetched_at DateTime?
+  // crawler bookkeeping
+  canonical_url   String?
+  http_status     Int?
+  excluded_reason String?
   created_at DateTime      @default(now())
   updated_at DateTime      @updatedAt
 
@@ -185,6 +189,7 @@ model Page {
 
   @@unique([site_id, url])
   @@index([site_id, fetched_at])
+  @@index([site_id, http_status])
   @@index([created_at])
 }
 
