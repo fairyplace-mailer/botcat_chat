@@ -22,11 +22,43 @@ function serializeError(err: unknown) {
   return { name: "UnknownError", message: String(err) };
 }
 
+async function upsertWixInstall({
+  wixSiteId,
+  instanceId,
+}: {
+  wixSiteId: string;
+  instanceId: string;
+}) {
+  // Ensure Site row exists and store Wix identifiers.
+  // Domain/name may be unknown at install time.
+  const domain = `wix:${wixSiteId}`;
+
+  const site = await prisma.site.upsert({
+    where: { domain },
+    create: {
+      name: domain,
+      domain,
+      type: "wix",
+      wix_site_id: wixSiteId,
+      wix_instance_id: instanceId,
+      primary_language: "en",
+    },
+    update: {
+      wix_site_id: wixSiteId,
+      wix_instance_id: instanceId,
+      updated_at: new Date(),
+    },
+  });
+
+  return site;
+}
+
 /**
  * Wix app install callback.
  *
- * Wix redirects here during install/re-install:
- *   /api/wix/install?instance=...&wixSiteId=...
+ * Supported:
+ *  - GET  /api/wix/install?instance=...&wixSiteId=...
+ *  - POST /api/wix/install { instance, wixSiteId }
  */
 export async function GET(req: NextRequest) {
   try {
@@ -45,30 +77,54 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Ensure Site row exists and store Wix identifiers.
-    // Domain/name may be unknown at install time.
-    const domain = `wix:${wixSiteId}`;
-
-    const site = await prisma.site.upsert({
-      where: { domain },
-      create: {
-        name: domain,
-        domain,
-        type: "wix",
-        wix_site_id: wixSiteId,
-        wix_instance_id: instanceId,
-        primary_language: "en",
-      },
-      update: {
-        wix_site_id: wixSiteId,
-        wix_instance_id: instanceId,
-        updated_at: new Date(),
-      },
-    });
+    const site = await upsertWixInstall({ wixSiteId, instanceId });
 
     return NextResponse.json({ ok: true, siteId: site.id, wixSiteId });
   } catch (err) {
-    console.error("/api/wix/install failed", err);
+    console.error("/api/wix/install GET failed", err);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Internal error",
+        details: serializeError(err),
+      },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const contentType = req.headers.get("content-type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      return NextResponse.json(
+        { ok: false, error: "Expected application/json" },
+        { status: 415 },
+      );
+    }
+
+    const body = (await req.json().catch(() => null)) as
+      | { instance?: unknown; wixSiteId?: unknown }
+      | null;
+
+    const instanceId = String(body?.instance ?? "").trim();
+    const wixSiteId = String(body?.wixSiteId ?? "").trim();
+
+    if (!wixSiteId || !instanceId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Missing required JSON fields: wixSiteId and instance",
+        },
+        { status: 400 },
+      );
+    }
+
+    const site = await upsertWixInstall({ wixSiteId, instanceId });
+
+    return NextResponse.json({ ok: true, siteId: site.id, wixSiteId });
+  } catch (err) {
+    console.error("/api/wix/install POST failed", err);
     return NextResponse.json(
       {
         ok: false,
