@@ -11,43 +11,17 @@ function addMinutes(base: Date, minutes: number): Date {
   return new Date(base.getTime() + minutes * 60 * 1000);
 }
 
-function toIsoDate(d: Date): string {
+function toUtcIsoDate(d: Date): string {
+  // YYYY-MM-DD in UTC
   return d.toISOString().slice(0, 10);
-}
-
-function getLocalNow(timeZone: string): Date {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-
-  const get = (type: string) => parts.find((p) => p.type === type)?.value;
-
-  const y = get("year");
-  const m = get("month");
-  const d = get("day");
-  const hh = get("hour");
-  const mm = get("minute");
-  const ss = get("second");
-
-  if (!y || !m || !d || !hh || !mm || !ss) return now;
-
-  return new Date(`${y}-${m}-${d}T${hh}:${mm}:${ss}.000Z`);
 }
 
 async function acquireDailyLock(params: {
   name: string;
-  localDateKey: string;
+  utcDateKey: string;
   now: Date;
 }): Promise<boolean> {
-  const { name, localDateKey, now } = params;
+  const { name, utcDateKey, now } = params;
 
   const lockedUntil = addMinutes(now, 20);
 
@@ -68,14 +42,14 @@ async function acquireDailyLock(params: {
       locked_until: { lt: now },
       NOT: {
         meta: {
-          equals: { dateKey: localDateKey },
+          equals: { dateKey: utcDateKey },
         },
       },
     },
     data: {
-      locked_at: new Date(),
+      locked_at: now,
       locked_until: lockedUntil,
-      meta: { dateKey: localDateKey },
+      meta: { dateKey: utcDateKey },
     },
   });
 
@@ -84,19 +58,11 @@ async function acquireDailyLock(params: {
 
 export async function GET() {
   const runStartedAt = new Date();
-  const timeZone = process.env.TIMEZONE?.trim() || "Asia/Jerusalem";
+  const utcDateKey = toUtcIsoDate(runStartedAt);
 
-  // Window gating: only run during local 00:00–00:59
-  const localNow = getLocalNow(timeZone);
-  const localHour = Number(localNow.toISOString().slice(11, 13));
-  if (localHour !== 0) {
-    return NextResponse.json({ ok: true, skipped: true, reason: "outside-window" });
-  }
-
-  const localDateKey = toIsoDate(localNow);
   const acquired = await acquireDailyLock({
     name: TASK_NAME,
-    localDateKey,
+    utcDateKey,
     now: runStartedAt,
   });
 
