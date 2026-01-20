@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { openai } from "@/lib/openai";
 import { loadReferenceContextDocs } from "./reference-context";
 import { chunkMarkdownByHeadings } from "./chunking";
+import { updateReferenceChunkVector } from "./pgvector";
 
 export async function ingestReferenceContext(params?: {
   rootDir?: string;
@@ -54,22 +55,33 @@ export async function ingestReferenceContext(params?: {
         input: c.contentMd,
       });
 
-      const vector = emb.data?.[0]?.embedding;
-      if (!Array.isArray(vector)) {
+      const embedding = emb.data?.[0]?.embedding;
+      if (!Array.isArray(embedding)) {
         throw new Error("Embedding response missing embedding[]");
       }
 
-      await prisma.referenceChunk.create({
+      const created = await prisma.referenceChunk.create({
         data: {
           doc_id: upserted.id,
           chunk_index: c.chunkIndex,
           content_md: c.contentMd,
           token_estimate: c.tokenEstimate,
           embedding_model: env.OPENAI_MODEL_EMBEDDING,
-          vector,
-          dims: vector.length,
+          // Legacy JSON (kept temporarily for backward compatibility)
+          vector: embedding as any,
+          dims: embedding.length,
         },
       });
+
+      // New pgvector column (if present after migration)
+      // If migration isn't applied yet, this UPDATE will fail at runtime.
+      // We'll wire cron order so migration is applied before enabling daily cron.
+      await updateReferenceChunkVector({
+        prisma,
+        chunkId: created.id,
+        embedding,
+      });
+
       chunksWritten++;
     }
 
