@@ -10,6 +10,11 @@ import {
 import crypto from "node:crypto";
 import { marked } from "marked";
 
+/**
+ * @deprecated Use /api/cron/web-kb-seed + /api/cron/web-kb-ingest and src/server/rag/web-kb.ts.
+ * This legacy crawler is kept for backwards compatibility but is no longer scheduled.
+ */
+
 const USER_AGENT = "BotCat/1.0 (+https://www.fairyplace.biz)";
 const FETCH_TIMEOUT_MS = 20_000;
 
@@ -231,7 +236,6 @@ function parseRobotsTxtDisallow(robotsTxt: string): string[] {
     const value = (m[2] ?? "").trim();
 
     if (key === "user-agent") {
-      // Start of a new UA line. In robots.txt blocks UA lines can repeat.
       const ua = value.toLowerCase();
       active = ua === "*" || ua === "botcat";
       if (active) seenRelevantUa = true;
@@ -239,13 +243,11 @@ function parseRobotsTxtDisallow(robotsTxt: string): string[] {
     }
 
     if (key === "disallow" && active) {
-      // Empty Disallow means allow all.
       if (!value) continue;
       disallow.push(value);
     }
   }
 
-  // If file exists but had no relevant UA, be conservative and treat as allow all.
   if (!seenRelevantUa) return [];
 
   return disallow;
@@ -258,8 +260,6 @@ function isAllowedByRobots(params: {
   const path = urlPathnameForRobots(params.url);
 
   for (const rule of params.disallowRules) {
-    // Support the common simple prefix semantics.
-    // Ignore wildcards for now.
     if (rule === "/") return false;
     if (path.startsWith(rule)) return false;
   }
@@ -428,8 +428,6 @@ async function writeImages(params: {
 }
 
 function htmlToMarkdownText(html: string, title: string | null): string {
-  // Basic structure: prepend title as H1 if present.
-  // Keep the conversion stable and avoid DOM.
   const mainHtml = extractMainContentHtml(html);
   const text = stripHtmlToText(mainHtml);
   const body = String(marked.parseInline(text)).trim() || text;
