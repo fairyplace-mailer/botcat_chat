@@ -7,7 +7,9 @@ import { chooseBotCatImageModel, chooseBotCatModel } from "@/lib/model-router";
 import { detectLanguageIso6391 } from "@/lib/language-detect";
 import {
   formatReferenceContextBlock,
+  formatWebContextBlock,
   retrieveRelevantReferenceChunks,
+  retrieveRelevantWebSections,
 } from "@/server/rag/retrieval";
 import { updateSessionSummaryIfNeeded } from "@/server/rag/session-summary";
 import { buildBotCatSystemPrompt } from "@/lib/botcat-chat-prompt";
@@ -116,7 +118,7 @@ async function generateBotImagePng(prompt: string): Promise<{
   }
 
   const bytes = Buffer.from(b64, "base64");
-  const fileName = `bot_generated_${quality === "high" ? "high" : "std"}_${crypto
+  const fileName = `bot_generated/${quality === "high" ? "high" : "std"}_${crypto
     .randomUUID()
     .slice(0, 6)}.png`;
 
@@ -302,7 +304,10 @@ export async function POST(req: Request) {
 
   // RAG retrieval (best-effort)
   let referenceContextBlock = "";
+  let webContextBlock = "";
+
   if (messageEmbedding) {
+    // Reference docs
     try {
       const chunks = await retrieveRelevantReferenceChunks({
         queryEmbedding: messageEmbedding,
@@ -317,6 +322,34 @@ export async function POST(req: Request) {
             payload: {
               type: "rag_retrieval_failed",
               messageId: userMessageId,
+              scope: "reference",
+            },
+            status_code: 200,
+            error_message: String(err?.message ?? err),
+          },
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    // Web KB (bagsoflove + spoonflower)
+    try {
+      const sections = await retrieveRelevantWebSections({
+        queryEmbedding: messageEmbedding,
+        topK: 5,
+        domains: ["bagsoflove.com", "spoonflower.com"],
+      });
+      webContextBlock = formatWebContextBlock(sections);
+    } catch (err: any) {
+      try {
+        await prisma.webhookLog.create({
+          data: {
+            conversation_id: conversation.id,
+            payload: {
+              type: "rag_retrieval_failed",
+              messageId: userMessageId,
+              scope: "web_kb",
             },
             status_code: 200,
             error_message: String(err?.message ?? err),
@@ -382,7 +415,8 @@ export async function POST(req: Request) {
     hasUserAttachments: attachments.length > 0,
   });
 
-  const messages: any[] = [{ role: "system", content: systemPrompt }];
+  // Add web context as first user-visible context in the system prompt, to encourage linking.
+  const messages: any[] = [{ role: "system", content: `${systemPrompt}\n\n${referenceContextBlock}\n\n${webContextBlock}`.trim() }];
 
   for (const m of history) {
     if (m.role === "User") {
