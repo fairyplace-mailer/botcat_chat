@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/rag-ingest",
-      "schedule": "0 * * * *"
+      "schedule": "20 1 * * *"
     }
   ]
 }
