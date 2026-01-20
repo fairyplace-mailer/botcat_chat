@@ -32,7 +32,7 @@ export type WebSourceConfig = {
    */
   denyPathSubstrings?: string[];
 
-  /** Hard cap to avoid runaway crawling (still small sites). */
+  /** Hard cap to avoid runaway crawling. */
   maxPagesPerRun: number;
 };
 
@@ -56,14 +56,13 @@ const DEFAULT_DENY_PATH_SUBSTRINGS = [
 ];
 
 export const WEB_SOURCES: WebSourceConfig[] = [
-  // Wix public pages (HTML crawl): take all published public pages on both small sites.
+  // Wix public pages (HTML crawl)
   {
     name: "Fairyplace (Wix)",
     type: "wix",
     domain: "www.fairyplace.biz",
     primaryLanguage: "en",
     startUrls: ["https://www.fairyplace.biz/"],
-    // For Wix sites we allow the whole site, but still deny obvious non-content areas.
     mode: "prefix",
     source: "page",
     denyPathSubstrings: DEFAULT_DENY_PATH_SUBSTRINGS,
@@ -75,7 +74,6 @@ export const WEB_SOURCES: WebSourceConfig[] = [
     domain: "fairyplaceua.wixsite.com",
     primaryLanguage: "en",
     startUrls: ["https://fairyplaceua.wixsite.com/fairyplace"],
-    // Allow everything under the site root path.
     allowedPathPrefixes: ["/fairyplace"],
     mode: "prefix",
     source: "page",
@@ -83,45 +81,50 @@ export const WEB_SOURCES: WebSourceConfig[] = [
     maxPagesPerRun: 200,
   },
 
-  // External: Spoonflower (prefix-based allowlist agreed with user)
+  // External: Spoonflower (curated: exclude designer/design catalogs)
   {
     name: "Spoonflower",
     type: "external",
     domain: "www.spoonflower.com",
     primaryLanguage: "en",
     startUrls: [
-      // Fabric types + below
-      "https://www.spoonflower.com/en/fabric",
-
-      // Wallpaper categories + below
-      "https://www.spoonflower.com/en/wallpaper",
-
-      // Explore Home Decor + below
-      "https://www.spoonflower.com/en/home-decor",
-
-      // About/how/purpose + below
-      "https://www.spoonflower.com/en/about",
-      "https://www.spoonflower.com/en/how-it-works",
-      "https://www.spoonflower.com/en/purpose-impact",
-
-      // Legal single pages (treated as prefixes too; ok)
+      // Help / policies / shipping / returns
+      "https://www.spoonflower.com/en/help",
+      "https://www.spoonflower.com/en/help/articles",
+      "https://www.spoonflower.com/en/returns",
+      "https://www.spoonflower.com/en/shipping",
       "https://www.spoonflower.com/en/terms-of-service",
       "https://www.spoonflower.com/en/privacy-notice",
       "https://www.spoonflower.com/en/accessibility",
+
+      // Production/product info (non-design catalog)
+      "https://www.spoonflower.com/en/how-it-works",
+      "https://www.spoonflower.com/en/about",
     ],
     mode: "prefix",
     source: "page",
-    denyPathSubstrings: DEFAULT_DENY_PATH_SUBSTRINGS,
+    denyPathSubstrings: [
+      ...DEFAULT_DENY_PATH_SUBSTRINGS,
+      // Exclude design/designer marketplace-like areas
+      "/design",
+      "/designer",
+      "/collection",
+      "/collections",
+      "/shop",
+      "/marketplace",
+      "/designs",
+    ],
     maxPagesPerRun: 500,
   },
 
-  // External: Bags of Love
+  // External: Bags of Love (read almost everything public)
   {
     name: "BagsOfLove",
     type: "external",
     domain: "www.bagsoflove.com",
     primaryLanguage: "en",
     startUrls: [
+      "https://www.bagsoflove.com/",
       "https://www.bagsoflove.com/contact-us",
       "https://www.bagsoflove.com/discounts",
       "https://www.bagsoflove.com/faq",
@@ -129,12 +132,8 @@ export const WEB_SOURCES: WebSourceConfig[] = [
       "https://www.bagsoflove.com/returns",
       "https://www.bagsoflove.com/terms-and-conditions",
       "https://www.bagsoflove.com/privacy-policy",
-      "https://www.bagsoflove.com/affiliates",
       "https://www.bagsoflove.com/wholesale-accounts",
-      "https://www.bagsoflove.com/merchandise",
       "https://www.bagsoflove.com/about-us",
-
-      // Product pages (self-design) - prefix scope; exact structure can evolve.
       "https://www.bagsoflove.com/products",
     ],
     mode: "prefix",
@@ -146,12 +145,10 @@ export const WEB_SOURCES: WebSourceConfig[] = [
 
 export function getAllowedPrefixesForSource(source: WebSourceConfig): string[] {
   if (source.allowedPathPrefixes?.length) return source.allowedPathPrefixes;
-  // Derive from startUrls.
   return source.startUrls
     .map((u) => {
       const url = new URL(u);
       const p = url.pathname;
-      // Normalize: keep at least "/".
       return p.length ? p : "/";
     })
     .filter(Boolean);
@@ -159,12 +156,15 @@ export function getAllowedPrefixesForSource(source: WebSourceConfig): string[] {
 
 export function isAllowedUrlForSource(url: URL, source: WebSourceConfig): boolean {
   if (url.hostname !== source.domain) return false;
-
-  // Only http(s)
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
 
   const prefixes = getAllowedPrefixesForSource(source);
-  const okPrefix = prefixes.some((p) => url.pathname === p || url.pathname.startsWith(p.endsWith("/") ? p : `${p}/`) || (p === "/" && url.pathname.startsWith("/")));
+  const okPrefix = prefixes.some(
+    (p) =>
+      url.pathname === p ||
+      url.pathname.startsWith(p.endsWith("/") ? p : `${p}/`) ||
+      (p === "/" && url.pathname.startsWith("/"))
+  );
   if (!okPrefix) return false;
 
   const deny = [...DEFAULT_DENY_PATH_SUBSTRINGS, ...(source.denyPathSubstrings ?? [])];
