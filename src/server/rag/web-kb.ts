@@ -336,26 +336,16 @@ export async function ingestWebKb(params: {
     where: {
       site: { type: "external" },
       excluded_reason: null,
-      OR: [
-        { fetched_at: null },
-        {
-          fetched_at: {
-            lt: addHours(now, -24 * 365),
-          },
-        },
-      ],
+      OR: [{ fetched_at: null }, { fetched_at: { not: null } }],
     },
     take: params.maxPages,
     orderBy: [{ fetched_at: "asc" }],
     select: {
       id: true,
-      site_id: true,
       url: true,
-      title: true,
       fetched_at: true,
       content_hash: true,
       refresh_interval_hours: true,
-      site: { select: { domain: true } },
     },
   });
 
@@ -372,7 +362,6 @@ export async function ingestWebKb(params: {
       continue;
     }
 
-    // Due check in app layer until we add better query: fetched_at + refresh_interval
     const interval =
       typeof p.refresh_interval_hours === "number"
         ? p.refresh_interval_hours
@@ -392,7 +381,6 @@ export async function ingestWebKb(params: {
     }
 
     if (!res.ok) {
-      // If page disappeared: mark excluded.
       if (res.status === 404 || res.status === 410) {
         await prisma.page.update({
           where: { id: p.id },
@@ -427,7 +415,6 @@ export async function ingestWebKb(params: {
       continue;
     }
 
-    // Changed: rebuild sections + embeddings
     await prisma.section.deleteMany({ where: { page_id: p.id } });
 
     const chunks = chunkMarkdownByHeadings(textForHash, {
@@ -458,7 +445,7 @@ export async function ingestWebKb(params: {
           content_hash: contentHash,
           source: "page" as ContentSource,
           embedding_model: embeddingModel,
-          // keep legacy Json in place for now
+          // legacy JSON column (still present)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           vector: vector as any,
           dims: vector.length,
@@ -466,10 +453,12 @@ export async function ingestWebKb(params: {
         select: { id: true },
       });
 
-      // Write pgvector column (after migration)
+      // Write pgvector column
       await updateSectionVector({
+        prisma,
         sectionId: created.id,
         embedding: vector,
+        embeddingModel,
       });
 
       sectionsWritten++;
