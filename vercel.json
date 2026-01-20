@@ -9,6 +9,14 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/web-kb-seed",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/web-kb-ingest",
+      "schedule": "10 1 * * *"
+    },
+    {
       "path": "/api/cron/rag-ingest",
       "schedule": "20 1 * * *"
     }
