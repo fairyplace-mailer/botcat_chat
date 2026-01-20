@@ -338,7 +338,7 @@ export async function POST(req: Request) {
       const sections = await retrieveRelevantWebSections({
         queryEmbedding: messageEmbedding,
         topK: 5,
-        domains: ["bagsoflove.com", "spoonflower.com"],
+        domains: ["www.bagsoflove.com", "www.spoonflower.com"],
       });
       webContextBlock = formatWebContextBlock(sections);
     } catch (err: any) {
@@ -415,8 +415,12 @@ export async function POST(req: Request) {
     hasUserAttachments: attachments.length > 0,
   });
 
-  // Add web context as first user-visible context in the system prompt, to encourage linking.
-  const messages: any[] = [{ role: "system", content: `${systemPrompt}\n\n${referenceContextBlock}\n\n${webContextBlock}`.trim() }];
+  const messages: any[] = [
+    {
+      role: "system",
+      content: `${systemPrompt}\n\n${referenceContextBlock}\n\n${webContextBlock}`.trim(),
+    },
+  ];
 
   for (const m of history) {
     if (m.role === "User") {
