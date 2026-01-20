@@ -65,7 +65,10 @@ function stripHtmlToText(html: string): string {
     .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
 
-  s = s.replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr|\/section|\/article)>/gi, "\n");
+  s = s.replace(
+    /<(br|\/p|\/div|\/li|\/h\d|\/tr|\/section|\/article)>/gi,
+    "\n"
+  );
   s = s.replace(/<[^>]+>/g, " ");
 
   s = s
@@ -87,7 +90,10 @@ function extractTitle(html: string): string | null {
 
 function extractMainContentHtml(html: string): string {
   const tryTag = (tag: string): string | null => {
-    const re = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+    const re = new RegExp(
+      `<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+      "i"
+    );
     const m = html.match(re);
     return m?.[1] ? String(m[1]) : null;
   };
@@ -289,18 +295,14 @@ export async function seedWebSources(params: {
           canonical_url: key,
           http_status: res.status,
           excluded_reason: null,
-          // @ts-expect-error (field added via migration)
           last_seen_at: new Date(),
-          // @ts-expect-error (field added via migration)
           refresh_interval_hours: classifyRefreshIntervalHours(normalizedUrl),
         },
         update: {
           title,
           http_status: res.status,
           excluded_reason: null,
-          // @ts-expect-error (field added via migration)
           last_seen_at: new Date(),
-          // @ts-expect-error (field added via migration)
           refresh_interval_hours: classifyRefreshIntervalHours(normalizedUrl),
         },
       });
@@ -336,7 +338,6 @@ export async function ingestWebKb(params: {
       excluded_reason: null,
       OR: [
         { fetched_at: null },
-        // @ts-expect-error (field added via migration)
         {
           fetched_at: {
             lt: addHours(now, -24 * 365),
@@ -352,9 +353,7 @@ export async function ingestWebKb(params: {
       url: true,
       title: true,
       fetched_at: true,
-      // @ts-expect-error (field added via migration)
       content_hash: true,
-      // @ts-expect-error (field added via migration)
       refresh_interval_hours: true,
       site: { select: { domain: true } },
     },
@@ -374,7 +373,10 @@ export async function ingestWebKb(params: {
     }
 
     // Due check in app layer until we add better query: fetched_at + refresh_interval
-    const interval = typeof (p as any).refresh_interval_hours === "number" ? (p as any).refresh_interval_hours : 24 * 20;
+    const interval =
+      typeof p.refresh_interval_hours === "number"
+        ? p.refresh_interval_hours
+        : 24 * 20;
     if (p.fetched_at) {
       const dueAt = addHours(p.fetched_at, interval);
       if (dueAt > now) continue;
@@ -411,7 +413,7 @@ export async function ingestWebKb(params: {
     const textForHash = htmlToTextForHash(res.text, title);
     const nextHash = sha256(textForHash);
 
-    if ((p as any).content_hash && (p as any).content_hash === nextHash) {
+    if (p.content_hash && p.content_hash === nextHash) {
       pagesUnchanged++;
       await prisma.page.update({
         where: { id: p.id },
@@ -419,7 +421,6 @@ export async function ingestWebKb(params: {
           title,
           fetched_at: now,
           http_status: res.status,
-          // @ts-expect-error (field added via migration)
           last_seen_at: now,
         },
       });
@@ -447,7 +448,8 @@ export async function ingestWebKb(params: {
         input: content,
       });
       const vector = emb.data?.[0]?.embedding;
-      if (!Array.isArray(vector)) throw new Error("Embedding response missing embedding[]");
+      if (!Array.isArray(vector))
+        throw new Error("Embedding response missing embedding[]");
 
       const created = await prisma.section.create({
         data: {
@@ -481,9 +483,7 @@ export async function ingestWebKb(params: {
         title,
         fetched_at: now,
         http_status: res.status,
-        // @ts-expect-error (field added via migration)
         last_seen_at: now,
-        // @ts-expect-error (field added via migration)
         content_hash: nextHash,
       },
     });
