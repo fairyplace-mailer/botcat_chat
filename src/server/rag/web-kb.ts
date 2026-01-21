@@ -14,6 +14,27 @@ import type { Prisma } from "@prisma/client";
 const USER_AGENT = "BotCat/1.0 (+https://www.fairyplace.biz)";
 const FETCH_TIMEOUT_MS = 20_000;
 
+type RunLog = {
+  run: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  maxDurationMs: number;
+} & Record<string, unknown>;
+
+function makeDeadline(maxDurationMs: number) {
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + maxDurationMs;
+  const isExpired = () => Date.now() >= deadlineAt;
+  const remainingMs = () => Math.max(0, deadlineAt - Date.now());
+  return { startedAt, deadlineAt, maxDurationMs, isExpired, remainingMs };
+}
+
+function logRun(entry: RunLog) {
+  // One-line JSON for easy viewing in Vercel logs.
+  console.log(`[web-kb] ${JSON.stringify(entry)}`);
+}
+
 function sha256(text: string): string {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
@@ -240,13 +261,31 @@ function classifyRefreshIntervalHours(url: URL): number {
 export async function seedWebSources(params: {
   sources?: WebSourceConfig[];
   maxPagesPerSource: number;
-}): Promise<{ sourcesTotal: number; pagesVisited: number; pagesUpserted: number }> {
+  maxDurationMs?: number;
+}): Promise<{
+  sourcesTotal: number;
+  sourcesCompleted: number;
+  pagesVisited: number;
+  pagesUpserted: number;
+  pagesFetchFailed: number;
+  stoppedByTimeout: boolean;
+}> {
+  const deadline = makeDeadline(params.maxDurationMs ?? 70_000);
+
   const sources = params.sources ?? WEB_SOURCES.filter((s) => s.type === "external");
 
+  let sourcesCompleted = 0;
   let pagesVisited = 0;
   let pagesUpserted = 0;
+  let pagesFetchFailed = 0;
+  let stoppedByTimeout = false;
 
   for (const source of sources) {
+    if (deadline.isExpired()) {
+      stoppedByTimeout = true;
+      break;
+    }
+
     const site = await upsertSite({
       domain: source.domain,
       name: source.name,
@@ -266,6 +305,11 @@ export async function seedWebSources(params: {
     }
 
     while (queue.length > 0 && seen.size < params.maxPagesPerSource) {
+      if (deadline.isExpired()) {
+        stoppedByTimeout = true;
+        break;
+      }
+
       const url = queue.shift()!;
       const normalizedUrl = normalizeUrlForKey(url);
       const key = normalizedUrl.toString();
@@ -281,6 +325,7 @@ export async function seedWebSources(params: {
       try {
         res = await fetchText(normalizedUrl);
       } catch {
+        pagesFetchFailed++;
         continue;
       }
 
@@ -303,6 +348,7 @@ export async function seedWebSources(params: {
           excluded_reason: null,
           last_seen_at: new Date(),
           refresh_interval_hours: refreshIntervalHours,
+          // make due immediately; ingest will schedule to now + interval after first fetch
           next_fetch_at: new Date(),
         },
         update: {
@@ -311,6 +357,7 @@ export async function seedWebSources(params: {
           excluded_reason: null,
           last_seen_at: new Date(),
           refresh_interval_hours: refreshIntervalHours,
+          // re-check soon; seed is a discovery mechanism
           next_fetch_at: new Date(),
         },
       });
@@ -324,13 +371,37 @@ export async function seedWebSources(params: {
         queue.push(l);
       }
     }
+
+    sourcesCompleted++;
   }
 
-  return { sourcesTotal: sources.length, pagesVisited, pagesUpserted };
+  logRun({
+    run: "seed",
+    startedAt: new Date(deadline.startedAt).toISOString(),
+    finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - deadline.startedAt,
+    maxDurationMs: deadline.maxDurationMs,
+    sourcesTotal: sources.length,
+    sourcesCompleted,
+    pagesVisited,
+    pagesUpserted,
+    pagesFetchFailed,
+    stoppedByTimeout,
+  });
+
+  return {
+    sourcesTotal: sources.length,
+    sourcesCompleted,
+    pagesVisited,
+    pagesUpserted,
+    pagesFetchFailed,
+    stoppedByTimeout,
+  };
 }
 
 export async function ingestWebKb(params: {
   maxPages: number;
+  maxDurationMs?: number;
 }): Promise<{
   pagesConsidered: number;
   pagesFetched: number;
@@ -338,8 +409,10 @@ export async function ingestWebKb(params: {
   pagesUpdated: number;
   pagesFailed: number;
   sectionsWritten: number;
+  stoppedByTimeout: boolean;
 }> {
   const now = new Date();
+  const deadline = makeDeadline(params.maxDurationMs ?? 70_000);
 
   // Claim due pages to avoid double-processing on rare concurrent runs.
   const claimed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -380,8 +453,14 @@ export async function ingestWebKb(params: {
   let pagesUpdated = 0;
   let pagesFailed = 0;
   let sectionsWritten = 0;
+  let stoppedByTimeout = false;
 
   for (const p of claimed) {
+    if (deadline.isExpired()) {
+      stoppedByTimeout = true;
+      break;
+    }
+
     let url: URL;
     try {
       url = new URL(p.url);
@@ -482,6 +561,12 @@ export async function ingestWebKb(params: {
     let pageFailed = false;
 
     for (let i = 0; i < chunks.length; i++) {
+      if (deadline.isExpired()) {
+        stoppedByTimeout = true;
+        pageFailed = true;
+        break;
+      }
+
       const content = chunks[i]!.contentMd.trim();
       if (!content) continue;
 
@@ -532,14 +617,14 @@ export async function ingestWebKb(params: {
 
     if (pageFailed) {
       pagesFailed++;
-      // Backoff on embedding failures; keep page scheduled for retry.
+      // Backoff on embedding failures or timeout; keep page scheduled for retry.
       await prisma.page.update({
         where: { id: p.id },
         data: {
           title,
           http_status: res.status,
           last_seen_at: now,
-          next_fetch_at: addMinutes(now, 30),
+          next_fetch_at: stoppedByTimeout ? addMinutes(now, 30) : addMinutes(now, 30),
         },
       });
       continue;
@@ -560,6 +645,21 @@ export async function ingestWebKb(params: {
     });
   }
 
+  logRun({
+    run: "ingest",
+    startedAt: new Date(deadline.startedAt).toISOString(),
+    finishedAt: new Date().toISOString(),
+    durationMs: Date.now() - deadline.startedAt,
+    maxDurationMs: deadline.maxDurationMs,
+    pagesConsidered: claimed.length,
+    pagesFetched,
+    pagesUnchanged,
+    pagesUpdated,
+    pagesFailed,
+    sectionsWritten,
+    stoppedByTimeout,
+  });
+
   return {
     pagesConsidered: claimed.length,
     pagesFetched,
@@ -567,5 +667,6 @@ export async function ingestWebKb(params: {
     pagesUpdated,
     pagesFailed,
     sectionsWritten,
+    stoppedByTimeout,
   };
 }
