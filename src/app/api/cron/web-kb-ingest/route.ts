@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/server/db";
-import { ingestReferenceContext } from "@/server/rag/ingest";
+import { prisma } from "@/lib/prisma";
+import { ingestWebKb } from "@/server/rag/web-kb";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TASK_NAME = "rag-ingest";
+const TASK_NAME = "web-kb-ingest";
 
 function addMinutes(base: Date, minutes: number): Date {
   return new Date(base.getTime() + minutes * 60 * 1000);
 }
 
 function toUtcIsoDate(d: Date): string {
-  // YYYY-MM-DD in UTC
   return d.toISOString().slice(0, 10);
 }
 
@@ -23,7 +22,7 @@ async function acquireDailyLock(params: {
 }): Promise<boolean> {
   const { name, utcDateKey, now } = params;
 
-  const lockedUntil = addMinutes(now, 20);
+  const lockedUntil = addMinutes(now, 30);
 
   await prisma.cronLock.upsert({
     where: { name },
@@ -71,7 +70,9 @@ export async function GET() {
   }
 
   try {
-    const result = await ingestReferenceContext();
+    const result = await ingestWebKb({
+      maxPages: 15,
+    });
 
     await prisma.cleanupLog.create({
       data: {

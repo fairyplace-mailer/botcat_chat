@@ -121,7 +121,13 @@ model ReferenceChunk {
   token_estimate Int?
 
   embedding_model String
+
+  // Legacy JSON embedding (temporary, will be removed after backfill)
   vector          Json
+
+  // pgvector embedding
+  embedding       Unsupported("vector")?
+
   dims            Int
 
   created_at DateTime @default(now())
@@ -180,6 +186,13 @@ model Page {
   canonical_url   String?
   http_status     Int?
   excluded_reason String?
+
+  // web kb scheduling / freshness
+  content_hash            String?
+  last_seen_at            DateTime?
+  refresh_interval_hours  Int           @default(480)
+  next_fetch_at           DateTime?
+
   created_at DateTime      @default(now())
   updated_at DateTime      @updatedAt
 
@@ -190,6 +203,8 @@ model Page {
   @@unique([site_id, url])
   @@index([site_id, fetched_at])
   @@index([site_id, http_status])
+  @@index([site_id, refresh_interval_hours, fetched_at])
+  @@index([site_id, next_fetch_at])
   @@index([created_at])
 }
 
@@ -200,8 +215,13 @@ model Section {
   content_hash    String
   source          ContentSource
 
-  embedding_model String?
+  // Legacy JSON embedding (temporary)
   vector          Json?
+
+  // pgvector embedding
+  embedding       Unsupported("vector")?
+
+  embedding_model String?
   dims            Int?
 
   created_at      DateTime      @default(now())
