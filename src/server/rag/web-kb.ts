@@ -624,7 +624,7 @@ export async function ingestWebKb(params: {
           title,
           http_status: res.status,
           last_seen_at: now,
-          next_fetch_at: stoppedByTimeout ? addMinutes(now, 30) : addMinutes(now, 30),
+          next_fetch_at: addMinutes(now, 30),
         },
       });
       continue;
