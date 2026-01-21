@@ -21,6 +21,10 @@ function addHours(base: Date, hours: number): Date {
   return new Date(base.getTime() + hours * 60 * 60 * 1000);
 }
 
+function addMinutes(base: Date, minutes: number): Date {
+  return new Date(base.getTime() + minutes * 60 * 1000);
+}
+
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -331,38 +335,57 @@ export async function ingestWebKb(params: {
   pagesFetched: number;
   pagesUnchanged: number;
   pagesUpdated: number;
+  pagesFailed: number;
   sectionsWritten: number;
 }> {
   const now = new Date();
 
-  const pages = await prisma.page.findMany({
-    where: {
-      site: { type: "external" },
-      excluded_reason: null,
-      OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
-    },
-    take: params.maxPages,
-    orderBy: [{ next_fetch_at: "asc" }],
-    select: {
-      id: true,
-      url: true,
-      fetched_at: true,
-      content_hash: true,
-      refresh_interval_hours: true,
-      next_fetch_at: true,
-    },
+  // Claim due pages to avoid double-processing on rare concurrent runs.
+  const claimed = await prisma.$transaction(async (tx) => {
+    const due = await tx.page.findMany({
+      where: {
+        site: { type: "external" },
+        excluded_reason: null,
+        OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
+      },
+      take: params.maxPages,
+      orderBy: [{ next_fetch_at: "asc" }],
+      select: {
+        id: true,
+        url: true,
+        fetched_at: true,
+        content_hash: true,
+        refresh_interval_hours: true,
+        next_fetch_at: true,
+      },
+    });
+
+    const ids = due.map((p) => p.id);
+    if (ids.length > 0) {
+      await tx.page.updateMany({
+        where: { id: { in: ids } },
+        data: {
+          // Mark "in progress" for a short window.
+          next_fetch_at: addMinutes(now, 10),
+        },
+      });
+    }
+
+    return due;
   });
 
   let pagesFetched = 0;
   let pagesUnchanged = 0;
   let pagesUpdated = 0;
+  let pagesFailed = 0;
   let sectionsWritten = 0;
 
-  for (const p of pages) {
+  for (const p of claimed) {
     let url: URL;
     try {
       url = new URL(p.url);
     } catch {
+      pagesFailed++;
       continue;
     }
 
@@ -374,13 +397,23 @@ export async function ingestWebKb(params: {
     let res:
       | { ok: boolean; status: number; text: string; contentType: string }
       | undefined;
+
     try {
       res = await fetchText(url);
     } catch {
+      pagesFailed++;
+      await prisma.page.update({
+        where: { id: p.id },
+        data: {
+          // Backoff a bit on transient fetch errors
+          next_fetch_at: addMinutes(now, 30),
+        },
+      });
       continue;
     }
 
     if (!res.ok) {
+      pagesFailed++;
       if (res.status === 404 || res.status === 410) {
         await prisma.page.update({
           where: { id: p.id },
@@ -390,11 +423,30 @@ export async function ingestWebKb(params: {
             next_fetch_at: addHours(now, interval),
           },
         });
+      } else {
+        await prisma.page.update({
+          where: { id: p.id },
+          data: {
+            http_status: res.status,
+            next_fetch_at: addMinutes(now, 60),
+          },
+        });
       }
       continue;
     }
 
-    if (!isHtmlContentType(res.contentType)) continue;
+    if (!isHtmlContentType(res.contentType)) {
+      pagesFailed++;
+      await prisma.page.update({
+        where: { id: p.id },
+        data: {
+          excluded_reason: "non_html",
+          http_status: res.status,
+          next_fetch_at: addHours(now, interval),
+        },
+      });
+      continue;
+    }
 
     pagesFetched++;
 
@@ -426,19 +478,30 @@ export async function ingestWebKb(params: {
 
     const embeddingModel = selectBotCatEmbeddingModel();
 
+    let pageFailed = false;
+
     for (let i = 0; i < chunks.length; i++) {
       const content = chunks[i]!.contentMd.trim();
       if (!content) continue;
 
       const contentHash = sha256(content);
 
-      const emb = await openai.embeddings.create({
-        model: embeddingModel,
-        input: content,
-      });
-      const vector = emb.data?.[0]?.embedding;
-      if (!Array.isArray(vector))
-        throw new Error("Embedding response missing embedding[]");
+      let vector: number[] | undefined;
+      try {
+        const emb = await openai.embeddings.create({
+          model: embeddingModel,
+          input: content,
+        });
+        vector = emb.data?.[0]?.embedding;
+      } catch {
+        pageFailed = true;
+        break;
+      }
+
+      if (!Array.isArray(vector)) {
+        pageFailed = true;
+        break;
+      }
 
       const created = await prisma.section.create({
         data: {
@@ -466,6 +529,21 @@ export async function ingestWebKb(params: {
       sectionsWritten++;
     }
 
+    if (pageFailed) {
+      pagesFailed++;
+      // Backoff on embedding failures; keep page scheduled for retry.
+      await prisma.page.update({
+        where: { id: p.id },
+        data: {
+          title,
+          http_status: res.status,
+          last_seen_at: now,
+          next_fetch_at: addMinutes(now, 30),
+        },
+      });
+      continue;
+    }
+
     pagesUpdated++;
 
     await prisma.page.update({
@@ -482,10 +560,11 @@ export async function ingestWebKb(params: {
   }
 
   return {
-    pagesConsidered: pages.length,
+    pagesConsidered: claimed.length,
     pagesFetched,
     pagesUnchanged,
     pagesUpdated,
+    pagesFailed,
     sectionsWritten,
   };
 }
