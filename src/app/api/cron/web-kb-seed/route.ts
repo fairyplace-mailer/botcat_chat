@@ -78,6 +78,8 @@ export async function GET(req: Request) {
       maxPagesPerSource: 250,
     });
 
+    // Note: CleanupLog has no `meta` field. Detailed run metrics are logged to stdout
+    // by web-kb.ts for inspection in Vercel logs.
     await prisma.cleanupLog.create({
       data: {
         task_name: TASK_NAME,
@@ -86,7 +88,6 @@ export async function GET(req: Request) {
         deleted_attachments_count: 0,
         deleted_conversations_count: 0,
         errors: null,
-        meta: { ...result, forced: force } as any,
       },
     });
 
