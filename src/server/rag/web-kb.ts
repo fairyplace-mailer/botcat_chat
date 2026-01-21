@@ -283,6 +283,7 @@ export async function seedWebSources(params: {
       if (!isHtmlContentType(res.contentType)) continue;
 
       const title = extractTitle(res.text);
+      const refreshIntervalHours = classifyRefreshIntervalHours(normalizedUrl);
 
       await prisma.page.upsert({
         where: { site_id_url: { site_id: site.id, url: key } },
@@ -296,14 +297,16 @@ export async function seedWebSources(params: {
           http_status: res.status,
           excluded_reason: null,
           last_seen_at: new Date(),
-          refresh_interval_hours: classifyRefreshIntervalHours(normalizedUrl),
+          refresh_interval_hours: refreshIntervalHours,
+          next_fetch_at: new Date(),
         },
         update: {
           title,
           http_status: res.status,
           excluded_reason: null,
           last_seen_at: new Date(),
-          refresh_interval_hours: classifyRefreshIntervalHours(normalizedUrl),
+          refresh_interval_hours: refreshIntervalHours,
+          next_fetch_at: new Date(),
         },
       });
 
@@ -336,16 +339,17 @@ export async function ingestWebKb(params: {
     where: {
       site: { type: "external" },
       excluded_reason: null,
-      OR: [{ fetched_at: null }, { fetched_at: { not: null } }],
+      OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
     },
     take: params.maxPages,
-    orderBy: [{ fetched_at: "asc" }],
+    orderBy: [{ next_fetch_at: "asc" }],
     select: {
       id: true,
       url: true,
       fetched_at: true,
       content_hash: true,
       refresh_interval_hours: true,
+      next_fetch_at: true,
     },
   });
 
@@ -366,10 +370,6 @@ export async function ingestWebKb(params: {
       typeof p.refresh_interval_hours === "number"
         ? p.refresh_interval_hours
         : 24 * 20;
-    if (p.fetched_at) {
-      const dueAt = addHours(p.fetched_at, interval);
-      if (dueAt > now) continue;
-    }
 
     let res:
       | { ok: boolean; status: number; text: string; contentType: string }
@@ -387,6 +387,7 @@ export async function ingestWebKb(params: {
           data: {
             excluded_reason: `http_${res.status}`,
             http_status: res.status,
+            next_fetch_at: addHours(now, interval),
           },
         });
       }
@@ -410,6 +411,7 @@ export async function ingestWebKb(params: {
           fetched_at: now,
           http_status: res.status,
           last_seen_at: now,
+          next_fetch_at: addHours(now, interval),
         },
       });
       continue;
@@ -474,6 +476,7 @@ export async function ingestWebKb(params: {
         http_status: res.status,
         last_seen_at: now,
         content_hash: nextHash,
+        next_fetch_at: addHours(now, interval),
       },
     });
   }
