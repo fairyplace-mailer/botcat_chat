@@ -191,6 +191,7 @@ model Page {
   content_hash            String?
   last_seen_at            DateTime?
   refresh_interval_hours  Int           @default(480)
+  next_fetch_at           DateTime?
 
   created_at DateTime      @default(now())
   updated_at DateTime      @updatedAt
@@ -203,6 +204,7 @@ model Page {
   @@index([site_id, fetched_at])
   @@index([site_id, http_status])
   @@index([site_id, refresh_interval_hours, fetched_at])
+  @@index([site_id, next_fetch_at])
   @@index([created_at])
 }
 
