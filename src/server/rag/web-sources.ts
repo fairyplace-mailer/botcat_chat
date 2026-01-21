@@ -55,6 +55,39 @@ const DEFAULT_DENY_PATH_SUBSTRINGS = [
   "/search",
 ];
 
+/**
+ * Spoonflower is extremely large due to user-generated design catalogs.
+ * Keep crawl strictly within curated informational sections.
+ */
+const SPOONFLOWER_ALLOWED_PREFIXES = [
+  "/en/help",
+  "/en/returns",
+  "/en/shipping",
+  "/en/terms-of-service",
+  "/en/privacy-notice",
+  "/en/accessibility",
+  "/en/how-it-works",
+  "/en/about",
+];
+
+const SPOONFLOWER_DENY_SUBSTRINGS = [
+  // Design/designer/catalog areas
+  "/design",
+  "/designer",
+  "/designers",
+  "/collection",
+  "/collections",
+  "/designs",
+  "/marketplace",
+  // Catalog/shop-like areas (too big and mostly design-driven)
+  "/shop",
+  "/wallpaper",
+  "/fabric",
+  "/gift-wrap",
+  "/home-decor",
+  "/decor",
+];
+
 export const WEB_SOURCES: WebSourceConfig[] = [
   // Wix public pages (HTML crawl)
   {
@@ -88,7 +121,6 @@ export const WEB_SOURCES: WebSourceConfig[] = [
     domain: "www.spoonflower.com",
     primaryLanguage: "en",
     startUrls: [
-      // Help / policies / shipping / returns
       "https://www.spoonflower.com/en/help",
       "https://www.spoonflower.com/en/help/articles",
       "https://www.spoonflower.com/en/returns",
@@ -96,24 +128,13 @@ export const WEB_SOURCES: WebSourceConfig[] = [
       "https://www.spoonflower.com/en/terms-of-service",
       "https://www.spoonflower.com/en/privacy-notice",
       "https://www.spoonflower.com/en/accessibility",
-
-      // Production/product info (non-design catalog)
       "https://www.spoonflower.com/en/how-it-works",
       "https://www.spoonflower.com/en/about",
     ],
+    allowedPathPrefixes: SPOONFLOWER_ALLOWED_PREFIXES,
     mode: "prefix",
     source: "page",
-    denyPathSubstrings: [
-      ...DEFAULT_DENY_PATH_SUBSTRINGS,
-      // Exclude design/designer marketplace-like areas
-      "/design",
-      "/designer",
-      "/collection",
-      "/collections",
-      "/shop",
-      "/marketplace",
-      "/designs",
-    ],
+    denyPathSubstrings: [...DEFAULT_DENY_PATH_SUBSTRINGS, ...SPOONFLOWER_DENY_SUBSTRINGS],
     maxPagesPerRun: 500,
   },
 
