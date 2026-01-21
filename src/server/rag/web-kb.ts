@@ -9,6 +9,7 @@ import {
 } from "@/server/rag/web-sources";
 import { chunkMarkdownByHeadings } from "@/server/rag/chunking";
 import { updateSectionVector } from "@/server/rag/pgvector";
+import type { Prisma } from "@prisma/client";
 
 const USER_AGENT = "BotCat/1.0 (+https://www.fairyplace.biz)";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -341,7 +342,7 @@ export async function ingestWebKb(params: {
   const now = new Date();
 
   // Claim due pages to avoid double-processing on rare concurrent runs.
-  const claimed = await prisma.$transaction(async (tx) => {
+  const claimed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const due = await tx.page.findMany({
       where: {
         site: { type: "external" },
