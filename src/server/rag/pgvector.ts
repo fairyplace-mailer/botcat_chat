@@ -2,13 +2,28 @@ import type { PrismaClient } from "@prisma/client";
 
 export const EMBEDDING_DIMS = 3072;
 
+function safeNumberString(n: number): string {
+  if (!Number.isFinite(n)) throw new Error("embedding contains non-finite number");
+  // Ensure dot decimal and avoid scientific notation where possible.
+  // Postgres accepts scientific notation too, but keep it predictable.
+  const s = String(n);
+  if (s.includes("Infinity") || s.includes("NaN")) {
+    throw new Error("embedding contains invalid number");
+  }
+  return s;
+}
+
 export function embeddingToSqlVectorLiteral(embedding: number[]): string {
   // pgvector accepts: '[1,2,3]'::vector
-  // We must ensure it's numbers only.
   if (!Array.isArray(embedding) || embedding.length === 0) {
     throw new Error("embeddingToSqlVectorLiteral: embedding[] required");
   }
-  return `'[${embedding.join(",")}']::vector`;
+
+  const body = embedding.map(safeNumberString).join(",");
+
+  // IMPORTANT: this must be a *string literal* casted to vector.
+  // Do NOT use vector[...] syntax (that's arrays), pgvector expects '[...]'::vector.
+  return `'[${body}]'::vector`;
 }
 
 export async function updateReferenceChunkVector(params: {

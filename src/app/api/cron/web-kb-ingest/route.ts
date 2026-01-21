@@ -55,18 +55,22 @@ async function acquireDailyLock(params: {
   return updated.count === 1;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const runStartedAt = new Date();
   const utcDateKey = toUtcIsoDate(runStartedAt);
+  const url = new URL(req.url);
+  const force = url.searchParams.get("force") === "1";
 
-  const acquired = await acquireDailyLock({
-    name: TASK_NAME,
-    utcDateKey,
-    now: runStartedAt,
-  });
+  if (!force) {
+    const acquired = await acquireDailyLock({
+      name: TASK_NAME,
+      utcDateKey,
+      now: runStartedAt,
+    });
 
-  if (!acquired) {
-    return NextResponse.json({ ok: true, skipped: true, reason: "locked" });
+    if (!acquired) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "locked" });
+    }
   }
 
   try {
@@ -74,6 +78,8 @@ export async function GET() {
       maxPages: 15,
     });
 
+    // Note: CleanupLog has no `meta` field. Detailed run metrics are logged to stdout
+    // by web-kb.ts for inspection in Vercel logs.
     await prisma.cleanupLog.create({
       data: {
         task_name: TASK_NAME,
@@ -82,11 +88,10 @@ export async function GET() {
         deleted_attachments_count: 0,
         deleted_conversations_count: 0,
         errors: null,
-        meta: result as any,
       },
     });
 
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, forced: force, ...result });
   } catch (e: any) {
     const msg = e?.message ?? String(e);
 
