@@ -24,8 +24,12 @@ export const env = {
     process.env.OPENAI_MODEL_IMAGE_HIGH ?? "gpt-image-1",
 
   // Embeddings для поиска / RAG / аналитики
+  // NOTE: RAG spec требует фиксированную модель и размерность.
   OPENAI_MODEL_EMBEDDING:
-    process.env.OPENAI_MODEL_EMBEDDING ?? "text-embedding-3-large",
+    process.env.OPENAI_MODEL_EMBEDDING ?? "text-embedding-3-small",
+
+  // Секрет cron-эндпойнтов (Vercel Cron)
+  CRON_SECRET: process.env.CRON_SECRET ?? "",
 
   // Секрет вебхука BotCat → backend
   BOTCAT_WEBHOOK_SECRET: process.env.BOTCAT_WEBHOOK_SECRET ?? "",
