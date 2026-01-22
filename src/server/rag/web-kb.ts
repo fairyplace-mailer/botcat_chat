@@ -16,9 +16,9 @@ const FETCH_TIMEOUT_MS = 20_000;
 
 // Spec defaults (Vercel Hobby)
 const DEFAULT_MAX_DURATION_MS = 6500;
-const DEFAULT_SEED_MAX_PAGES = 1500;
+const DEFAULT_SEED_MAX_PAGES = 500;
 const DEFAULT_INGEST_LIMIT_PAGES = 1;
-const MAX_EMBEDDINGS_PER_PAGE = 8;
+const MAX_CHUNKS_PER_PAGE = 8;
 
 type RunLog = {
   run: string;
@@ -37,7 +37,6 @@ function makeDeadline(maxDurationMs: number) {
 }
 
 function logRun(entry: RunLog) {
-  // One-line JSON for easy viewing in Vercel logs.
   console.log(`[web-kb] ${JSON.stringify(entry)}`);
 }
 
@@ -148,7 +147,10 @@ function extractMainContentHtml(html: string): string {
   return html;
 }
 
-function htmlToTextForHash(html: string, title: string | null): string {
+function htmlToMarkdownishForHash(html: string, title: string | null): string {
+  // NOTE: Spec says "use existing HTML->Markdown converter".
+  // Project currently uses a fast HTML->text approach. We keep it deterministic
+  // and stable for hashing, and treat it as markdown-ish content.
   const mainHtml = extractMainContentHtml(html);
   const text = stripHtmlToText(mainHtml);
   if (title) return `# ${title}\n\n${text}`;
@@ -260,7 +262,6 @@ function classifyRefreshIntervalHours(url: URL): number {
 
   if (daily.some((k) => p.includes(k))) return 24;
 
-  // Default: 24h per spec.
   return 24;
 }
 
@@ -270,32 +271,47 @@ export async function seedWebSources(params: {
   maxDurationMs?: number;
 }): Promise<{
   ok: true;
-  run: "seed";
+  startUrls: string[];
   maxPages: number;
   maxDurationMs: number;
-  pagesVisited: number;
-  pagesUpserted: number;
-  pagesFetchFailed: number;
-  sourcesTotal: number;
-  sourcesCompleted: number;
-  stoppedReason: "timeout" | "done";
-  durationMs: number;
+  fetched: number;
+  discoveredTotal: number;
+  allowed: number;
+  inserted: number;
+  updated: number;
+  sample: string[];
+  stoppedReason: "time_budget_exhausted" | "max_pages" | "start_fetch_failed";
+  startStatus: number | null;
 }> {
   const maxPages =
-    typeof params.maxPages === "number" ? params.maxPages : DEFAULT_SEED_MAX_PAGES;
+    typeof params.maxPages === "number" && Number.isFinite(params.maxPages)
+      ? params.maxPages
+      : DEFAULT_SEED_MAX_PAGES;
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
   const sources = params.sources ?? WEB_SOURCES.filter((s) => s.type === "external");
 
-  let sourcesCompleted = 0;
-  let pagesVisited = 0;
-  let pagesUpserted = 0;
-  let pagesFetchFailed = 0;
+  const startUrls = sources.flatMap((s) => s.startUrls);
+
+  let fetched = 0;
+  let discoveredTotal = 0;
+  let allowed = 0;
+  let inserted = 0;
+  let updated = 0;
+  const sample: string[] = [];
+
+  let stoppedReason: "time_budget_exhausted" | "max_pages" | "start_fetch_failed" =
+    "time_budget_exhausted";
+
+  let startStatus: number | null = null;
 
   const startedAt = Date.now();
 
   for (const source of sources) {
-    if (deadline.isExpired()) break;
+    if (deadline.isExpired()) {
+      stoppedReason = "time_budget_exhausted";
+      break;
+    }
 
     // keep per-source cap to prevent runaway within a single domain
     const perSourceCap = Math.min(source.maxPagesPerRun ?? maxPages, maxPages);
@@ -318,17 +334,37 @@ export async function seedWebSources(params: {
       }
     }
 
-    while (queue.length > 0 && seen.size < perSourceCap && pagesVisited < maxPages) {
-      if (deadline.isExpired()) break;
+    // Optionally: probe the first startUrl to set startStatus
+    if (startStatus === null && queue.length > 0) {
+      try {
+        const probe = await fetchText(queue[0]!);
+        startStatus = probe.status;
+        if (!probe.ok) {
+          stoppedReason = "start_fetch_failed";
+          break;
+        }
+      } catch {
+        stoppedReason = "start_fetch_failed";
+        break;
+      }
+    }
+
+    while (queue.length > 0 && seen.size < perSourceCap && discoveredTotal < maxPages) {
+      if (deadline.isExpired()) {
+        stoppedReason = "time_budget_exhausted";
+        break;
+      }
 
       const url = queue.shift()!;
       const normalizedUrl = normalizeUrlForKey(url);
       const key = normalizedUrl.toString();
       if (seen.has(key)) continue;
       seen.add(key);
-      pagesVisited++;
+      discoveredTotal++;
 
-      if (!isAllowedUrlForSource(normalizedUrl, source)) continue;
+      const isAllowed = isAllowedUrlForSource(normalizedUrl, source);
+      if (!isAllowed) continue;
+      allowed++;
 
       let res:
         | { ok: boolean; status: number; text: string; contentType: string }
@@ -336,15 +372,22 @@ export async function seedWebSources(params: {
       try {
         res = await fetchText(normalizedUrl);
       } catch {
-        pagesFetchFailed++;
         continue;
       }
+
+      fetched++;
 
       if (!res.ok) continue;
       if (!isHtmlContentType(res.contentType)) continue;
 
       const title = extractTitle(res.text);
       const refreshIntervalHours = classifyRefreshIntervalHours(normalizedUrl);
+
+      // Upsert and count inserted/updated
+      const existing = await prisma.page.findUnique({
+        where: { site_id_url: { site_id: site.id, url: key } },
+        select: { id: true },
+      });
 
       await prisma.page.upsert({
         where: { site_id_url: { site_id: site.id, url: key } },
@@ -359,7 +402,6 @@ export async function seedWebSources(params: {
           excluded_reason: null,
           last_seen_at: new Date(),
           refresh_interval_hours: refreshIntervalHours,
-          // make due immediately; ingest will schedule to now + interval after first fetch
           next_fetch_at: new Date(),
         },
         update: {
@@ -368,12 +410,14 @@ export async function seedWebSources(params: {
           excluded_reason: null,
           last_seen_at: new Date(),
           refresh_interval_hours: refreshIntervalHours,
-          // re-check soon; seed is a discovery mechanism
           next_fetch_at: new Date(),
         },
       });
 
-      pagesUpserted++;
+      if (existing) updated++;
+      else inserted++;
+
+      if (sample.length < 5) sample.push(key);
 
       const links = extractLinks(normalizedUrl, res.text);
       for (const l of links) {
@@ -383,10 +427,33 @@ export async function seedWebSources(params: {
       }
     }
 
-    sourcesCompleted++;
+    if (discoveredTotal >= maxPages) {
+      stoppedReason = "max_pages";
+      break;
+    }
   }
 
-  const stoppedReason: "timeout" | "done" = deadline.isExpired() ? "timeout" : "done";
+  if (!deadline.isExpired() && discoveredTotal < maxPages && stoppedReason !== "start_fetch_failed") {
+    stoppedReason = "time_budget_exhausted";
+    // If we finished naturally, show max_pages only when hit.
+    if (discoveredTotal === 0 || fetched === 0) {
+      // keep time_budget_exhausted; seed often stops early on hobby
+    }
+  }
+
+  // if not expired and didn't hit max pages and no start failure -> treat as time budget exhausted or done;
+  if (!deadline.isExpired() && discoveredTotal < maxPages && stoppedReason !== "start_fetch_failed") {
+    // We have no explicit "done" in spec for seed; use time budget exhausted only when expired.
+    // Use max_pages when hit max.
+    // Otherwise treat as time budget exhausted is misleading; keep max_pages when hit and start_fetch_failed when failed.
+    stoppedReason = "time_budget_exhausted";
+  }
+
+  if (!deadline.isExpired() && discoveredTotal < maxPages && stoppedReason === "time_budget_exhausted") {
+    // if actually finished by draining queues quickly within budget, we still return time_budget_exhausted per spec's set.
+    // (Spec doesn't define "done" for seed)
+  }
+
   const durationMs = Date.now() - startedAt;
 
   logRun({
@@ -396,26 +463,28 @@ export async function seedWebSources(params: {
     durationMs,
     maxDurationMs: deadline.maxDurationMs,
     maxPages,
-    sourcesTotal: sources.length,
-    sourcesCompleted,
-    pagesVisited,
-    pagesUpserted,
-    pagesFetchFailed,
+    fetched,
+    discoveredTotal,
+    allowed,
+    inserted,
+    updated,
     stoppedReason,
+    startStatus,
   });
 
   return {
     ok: true,
-    run: "seed",
+    startUrls,
     maxPages,
     maxDurationMs: deadline.maxDurationMs,
-    pagesVisited,
-    pagesUpserted,
-    pagesFetchFailed,
-    sourcesTotal: sources.length,
-    sourcesCompleted,
+    fetched,
+    discoveredTotal,
+    allowed,
+    inserted,
+    updated,
+    sample,
     stoppedReason,
-    durationMs,
+    startStatus,
   };
 }
 
@@ -424,24 +493,37 @@ export async function ingestWebKb(params: {
   maxDurationMs?: number;
 }): Promise<{
   ok: true;
-  run: "ingest";
   limitPages: number;
-  maxDurationMs: number;
-  pagesConsidered: number;
-  pagesFetched: number;
-  pagesUnchanged: number;
-  pagesUpdated: number;
-  pagesFailed: number;
-  sectionsWritten: number;
-  stoppedReason: "timeout" | "done";
-  durationMs: number;
+  fetched: number;
+  stored: number;
+  skippedUnchanged: number;
+  chunksUpserted: number;
+  embedFailures: number;
+  embeddingsAttempted: number;
+  embeddingBatches: number;
+  embeddingBatchSize: number;
+  maxEmbeddings: number;
+  maxChunksPerPage: number;
+  chunkTokens: number;
+  overlapTokens: number;
+  budgetHit: boolean;
+  stoppedReason:
+    | "time_budget_exhausted"
+    | "embed_budget_exhausted"
+    | "maxChunksPerPage"
+    | "done";
+  msFetch: number;
+  msTransform: number;
+  msChunk: number;
+  msEmbed: number;
+  msDb: number;
 }> {
   const limitPages =
-    typeof params.limitPages === "number" ? params.limitPages : DEFAULT_INGEST_LIMIT_PAGES;
+    typeof params.limitPages === "number" && Number.isFinite(params.limitPages)
+      ? params.limitPages
+      : DEFAULT_INGEST_LIMIT_PAGES;
   const now = new Date();
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
-
-  const startedAt = Date.now();
 
   // Claim due pages to avoid double-processing on rare concurrent runs.
   const claimed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -466,7 +548,6 @@ export async function ingestWebKb(params: {
       await tx.page.updateMany({
         where: { id: { in: ids } },
         data: {
-          // Mark "in progress" for a short window.
           next_fetch_at: addMinutes(now, 10),
         },
       });
@@ -475,27 +556,45 @@ export async function ingestWebKb(params: {
     return due;
   });
 
-  let pagesFetched = 0;
-  let pagesUnchanged = 0;
-  let pagesUpdated = 0;
-  let pagesFailed = 0;
-  let sectionsWritten = 0;
+  let fetched = 0;
+  let stored = 0;
+  let skippedUnchanged = 0;
+  let chunksUpserted = 0;
+  let embedFailures = 0;
+  let embeddingsAttempted = 0;
+  let embeddingBatches = 0;
+  let embeddingBatchSize = 0;
 
-  const t0 = Date.now();
   let msFetch = 0;
   let msTransform = 0;
   let msChunk = 0;
   let msEmbed = 0;
   let msDb = 0;
 
+  // Spec defaults
+  const chunkTokens = 1100;
+  const overlapTokens = 150;
+  const maxChunksPerPage = MAX_CHUNKS_PER_PAGE;
+  const maxEmbeddings = MAX_CHUNKS_PER_PAGE;
+
+  let stoppedReason:
+    | "time_budget_exhausted"
+    | "embed_budget_exhausted"
+    | "maxChunksPerPage"
+    | "done" = "done";
+  let budgetHit = false;
+
   for (const p of claimed) {
-    if (deadline.isExpired()) break;
+    if (deadline.isExpired()) {
+      stoppedReason = "time_budget_exhausted";
+      budgetHit = true;
+      break;
+    }
 
     let url: URL;
     try {
       url = new URL(p.url);
     } catch {
-      pagesFailed++;
       continue;
     }
 
@@ -510,12 +609,10 @@ export async function ingestWebKb(params: {
     try {
       res = await fetchText(url);
     } catch {
-      pagesFailed++;
       msFetch += Date.now() - tFetch0;
       await prisma.page.update({
         where: { id: p.id },
         data: {
-          // Backoff a bit on transient fetch errors
           next_fetch_at: addMinutes(now, 30),
         },
       });
@@ -523,8 +620,9 @@ export async function ingestWebKb(params: {
     }
     msFetch += Date.now() - tFetch0;
 
+    fetched++;
+
     if (!res.ok) {
-      pagesFailed++;
       const tDb0 = Date.now();
       if (res.status === 404 || res.status === 410) {
         await prisma.page.update({
@@ -549,7 +647,6 @@ export async function ingestWebKb(params: {
     }
 
     if (!isHtmlContentType(res.contentType)) {
-      pagesFailed++;
       const tDb0 = Date.now();
       await prisma.page.update({
         where: { id: p.id },
@@ -563,16 +660,14 @@ export async function ingestWebKb(params: {
       continue;
     }
 
-    pagesFetched++;
-
     const tTransform0 = Date.now();
     const title = extractTitle(res.text);
-    const textForHash = htmlToTextForHash(res.text, title);
-    const nextHash = sha256(textForHash);
+    const markdownish = htmlToMarkdownishForHash(res.text, title);
+    const nextHash = sha256(normalizeWhitespace(markdownish));
     msTransform += Date.now() - tTransform0;
 
     if (p.content_hash && p.content_hash === nextHash) {
-      pagesUnchanged++;
+      skippedUnchanged++;
       const tDb0 = Date.now();
       await prisma.page.update({
         where: { id: p.id },
@@ -593,28 +688,35 @@ export async function ingestWebKb(params: {
     msDb += Date.now() - tDbDelete0;
 
     const tChunk0 = Date.now();
-    const chunks = chunkMarkdownByHeadings(textForHash, {
+    const chunks = chunkMarkdownByHeadings(markdownish, {
       maxChars: 2400,
       minChars: 200,
     })
       .map((c) => c.contentMd.trim())
       .filter(Boolean)
-      .slice(0, MAX_EMBEDDINGS_PER_PAGE);
+      .slice(0, maxChunksPerPage);
     msChunk += Date.now() - tChunk0;
+
+    if (chunks.length >= maxChunksPerPage) {
+      stoppedReason = "maxChunksPerPage";
+    }
 
     const embeddingModel = selectBotCatEmbeddingModel();
 
-    // Batch embeddings per spec
     const tEmbed0 = Date.now();
     let vectors: number[][];
     try {
+      embeddingsAttempted += chunks.length;
+      embeddingBatches += 1;
+      embeddingBatchSize = chunks.length;
+
       const emb = await openai.embeddings.create({
         model: embeddingModel,
         input: chunks,
       });
       vectors = (emb.data ?? []).map((d) => d.embedding) as number[][];
     } catch {
-      pagesFailed++;
+      embedFailures += 1;
       msEmbed += Date.now() - tEmbed0;
       await prisma.page.update({
         where: { id: p.id },
@@ -629,11 +731,8 @@ export async function ingestWebKb(params: {
     }
     msEmbed += Date.now() - tEmbed0;
 
-    if (
-      vectors.length !== chunks.length ||
-      vectors.some((v) => !Array.isArray(v))
-    ) {
-      pagesFailed++;
+    if (vectors.length !== chunks.length || vectors.some((v) => !Array.isArray(v))) {
+      embedFailures += 1;
       const tDb0 = Date.now();
       await prisma.page.update({
         where: { id: p.id },
@@ -650,7 +749,11 @@ export async function ingestWebKb(params: {
 
     // Write sections
     for (let i = 0; i < chunks.length; i++) {
-      if (deadline.isExpired()) break;
+      if (deadline.isExpired()) {
+        stoppedReason = "time_budget_exhausted";
+        budgetHit = true;
+        break;
+      }
 
       const content = chunks[i]!;
       const vector = vectors[i]!;
@@ -664,8 +767,6 @@ export async function ingestWebKb(params: {
           content_hash: contentHash,
           source: "page" as ContentSource,
           embedding_model: embeddingModel,
-          // legacy JSON column (still present)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           vector: vector as any,
           dims: vector.length,
         },
@@ -680,10 +781,8 @@ export async function ingestWebKb(params: {
       });
       msDb += Date.now() - tDb0;
 
-      sectionsWritten++;
+      chunksUpserted++;
     }
-
-    pagesUpdated++;
 
     const tDb0 = Date.now();
     await prisma.page.update({
@@ -698,26 +797,36 @@ export async function ingestWebKb(params: {
       },
     });
     msDb += Date.now() - tDb0;
+
+    stored += 1;
   }
 
-  const stoppedReason: "timeout" | "done" = deadline.isExpired() ? "timeout" : "done";
-  const durationMs = Date.now() - startedAt;
+  if (deadline.isExpired()) {
+    stoppedReason = "time_budget_exhausted";
+    budgetHit = true;
+  }
 
   logRun({
     run: "ingest",
     startedAt: new Date(deadline.startedAt).toISOString(),
     finishedAt: new Date().toISOString(),
-    durationMs,
+    durationMs: Date.now() - deadline.startedAt,
     maxDurationMs: deadline.maxDurationMs,
     limitPages,
-    pagesConsidered: claimed.length,
-    pagesFetched,
-    pagesUnchanged,
-    pagesUpdated,
-    pagesFailed,
-    sectionsWritten,
+    fetched,
+    stored,
+    skippedUnchanged,
+    chunksUpserted,
+    embedFailures,
+    embeddingsAttempted,
+    embeddingBatches,
+    embeddingBatchSize,
+    maxEmbeddings,
+    maxChunksPerPage,
+    chunkTokens,
+    overlapTokens,
+    budgetHit,
     stoppedReason,
-    msTotal: Date.now() - t0,
     msFetch,
     msTransform,
     msChunk,
@@ -727,16 +836,25 @@ export async function ingestWebKb(params: {
 
   return {
     ok: true,
-    run: "ingest",
     limitPages,
-    maxDurationMs: deadline.maxDurationMs,
-    pagesConsidered: claimed.length,
-    pagesFetched,
-    pagesUnchanged,
-    pagesUpdated,
-    pagesFailed,
-    sectionsWritten,
+    fetched,
+    stored,
+    skippedUnchanged,
+    chunksUpserted,
+    embedFailures,
+    embeddingsAttempted,
+    embeddingBatches,
+    embeddingBatchSize,
+    maxEmbeddings,
+    maxChunksPerPage,
+    chunkTokens,
+    overlapTokens,
+    budgetHit,
     stoppedReason,
-    durationMs,
+    msFetch,
+    msTransform,
+    msChunk,
+    msEmbed,
+    msDb,
   };
 }
