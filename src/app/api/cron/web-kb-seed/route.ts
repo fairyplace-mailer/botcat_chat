@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
+import { env } from "@/lib/env";
 import { seedWebSources } from "@/server/rag/web-kb";
 
 export const runtime = "nodejs";
@@ -14,6 +15,14 @@ function addMinutes(base: Date, minutes: number): Date {
 
 function toUtcIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+function isAuthorized(req: Request): boolean {
+  const expected = env.CRON_SECRET;
+  if (!expected) return false;
+
+  const header = req.headers.get("authorization") ?? "";
+  return header === `Bearer ${expected}`;
 }
 
 async function acquireDailyLock(params: {
@@ -57,10 +66,21 @@ async function acquireDailyLock(params: {
 }
 
 export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const runStartedAt = new Date();
   const utcDateKey = toUtcIsoDate(runStartedAt);
   const url = new URL(req.url);
+
   const force = url.searchParams.get("force") === "1";
+
+  const maxPagesRaw = url.searchParams.get("maxPages");
+  const maxDurationRaw = url.searchParams.get("maxDurationMs");
+
+  const maxPages = maxPagesRaw ? Number(maxPagesRaw) : undefined;
+  const maxDurationMs = maxDurationRaw ? Number(maxDurationRaw) : undefined;
 
   if (!force) {
     const acquired = await acquireDailyLock({
@@ -76,8 +96,8 @@ export async function GET(req: Request) {
 
   try {
     const result = await seedWebSources({
-      maxPages: 1500,
-      maxDurationMs: 6500,
+      maxPages: Number.isFinite(maxPages) ? maxPages : undefined,
+      maxDurationMs: Number.isFinite(maxDurationMs) ? maxDurationMs : undefined,
     });
 
     await prisma.cleanupLog.create({
