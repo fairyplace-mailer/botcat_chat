@@ -281,7 +281,8 @@ export async function seedWebSources(params: {
   stoppedReason: "timeout" | "done";
   durationMs: number;
 }> {
-  const maxPages = typeof params.maxPages === "number" ? params.maxPages : DEFAULT_SEED_MAX_PAGES;
+  const maxPages =
+    typeof params.maxPages === "number" ? params.maxPages : DEFAULT_SEED_MAX_PAGES;
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
   const sources = params.sources ?? WEB_SOURCES.filter((s) => s.type === "external");
@@ -292,111 +293,100 @@ export async function seedWebSources(params: {
   let pagesFetchFailed = 0;
 
   const startedAt = Date.now();
-  const stoppedReason: "timeout" | "done" = (() => {
-    for (const source of sources) {
-      if (deadline.isExpired()) return "timeout";
 
-      // keep per-source cap to prevent runaway within a single domain
-      const perSourceCap = Math.min(source.maxPagesPerRun ?? maxPages, maxPages);
+  for (const source of sources) {
+    if (deadline.isExpired()) break;
 
-      // eslint-disable-next-line no-inner-declarations
-      const runSource = async () => {
-        const site = await upsertSite({
-          domain: source.domain,
-          name: source.name,
-          type: source.type,
-          primaryLanguage: source.primaryLanguage,
-        });
+    // keep per-source cap to prevent runaway within a single domain
+    const perSourceCap = Math.min(source.maxPagesPerRun ?? maxPages, maxPages);
 
-        const queue: URL[] = [];
-        const seen = new Set<string>();
+    const site = await upsertSite({
+      domain: source.domain,
+      name: source.name,
+      type: source.type,
+      primaryLanguage: source.primaryLanguage,
+    });
 
-        for (const u of source.startUrls) {
-          try {
-            queue.push(normalizeUrlForKey(new URL(u)));
-          } catch {
-            // ignore
-          }
-        }
+    const queue: URL[] = [];
+    const seen = new Set<string>();
 
-        while (queue.length > 0 && seen.size < perSourceCap && pagesVisited < maxPages) {
-          if (deadline.isExpired()) return;
-
-          const url = queue.shift()!;
-          const normalizedUrl = normalizeUrlForKey(url);
-          const key = normalizedUrl.toString();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          pagesVisited++;
-
-          if (!isAllowedUrlForSource(normalizedUrl, source)) continue;
-
-          let res:
-            | { ok: boolean; status: number; text: string; contentType: string }
-            | undefined;
-          try {
-            res = await fetchText(normalizedUrl);
-          } catch {
-            pagesFetchFailed++;
-            continue;
-          }
-
-          if (!res.ok) continue;
-          if (!isHtmlContentType(res.contentType)) continue;
-
-          const title = extractTitle(res.text);
-          const refreshIntervalHours = classifyRefreshIntervalHours(normalizedUrl);
-
-          await prisma.page.upsert({
-            where: { site_id_url: { site_id: site.id, url: key } },
-            create: {
-              site_id: site.id,
-              url: key,
-              title,
-              source: "page" as ContentSource,
-              fetched_at: null,
-              canonical_url: key,
-              http_status: res.status,
-              excluded_reason: null,
-              last_seen_at: new Date(),
-              refresh_interval_hours: refreshIntervalHours,
-              // make due immediately; ingest will schedule to now + interval after first fetch
-              next_fetch_at: new Date(),
-            },
-            update: {
-              title,
-              http_status: res.status,
-              excluded_reason: null,
-              last_seen_at: new Date(),
-              refresh_interval_hours: refreshIntervalHours,
-              // re-check soon; seed is a discovery mechanism
-              next_fetch_at: new Date(),
-            },
-          });
-
-          pagesUpserted++;
-
-          const links = extractLinks(normalizedUrl, res.text);
-          for (const l of links) {
-            if (l.hostname !== source.domain) continue;
-            if (!isAllowedUrlForSource(l, source)) continue;
-            queue.push(l);
-          }
-        }
-
-        sourcesCompleted++;
-      };
-
-      // Fire and await per-source processing
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      // (kept inline for readability; awaited below)
-      // @ts-expect-error - we call immediately
-      runSource();
+    for (const u of source.startUrls) {
+      try {
+        queue.push(normalizeUrlForKey(new URL(u)));
+      } catch {
+        // ignore
+      }
     }
 
-    return "done";
-  })();
+    while (queue.length > 0 && seen.size < perSourceCap && pagesVisited < maxPages) {
+      if (deadline.isExpired()) break;
 
+      const url = queue.shift()!;
+      const normalizedUrl = normalizeUrlForKey(url);
+      const key = normalizedUrl.toString();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pagesVisited++;
+
+      if (!isAllowedUrlForSource(normalizedUrl, source)) continue;
+
+      let res:
+        | { ok: boolean; status: number; text: string; contentType: string }
+        | undefined;
+      try {
+        res = await fetchText(normalizedUrl);
+      } catch {
+        pagesFetchFailed++;
+        continue;
+      }
+
+      if (!res.ok) continue;
+      if (!isHtmlContentType(res.contentType)) continue;
+
+      const title = extractTitle(res.text);
+      const refreshIntervalHours = classifyRefreshIntervalHours(normalizedUrl);
+
+      await prisma.page.upsert({
+        where: { site_id_url: { site_id: site.id, url: key } },
+        create: {
+          site_id: site.id,
+          url: key,
+          title,
+          source: "page" as ContentSource,
+          fetched_at: null,
+          canonical_url: key,
+          http_status: res.status,
+          excluded_reason: null,
+          last_seen_at: new Date(),
+          refresh_interval_hours: refreshIntervalHours,
+          // make due immediately; ingest will schedule to now + interval after first fetch
+          next_fetch_at: new Date(),
+        },
+        update: {
+          title,
+          http_status: res.status,
+          excluded_reason: null,
+          last_seen_at: new Date(),
+          refresh_interval_hours: refreshIntervalHours,
+          // re-check soon; seed is a discovery mechanism
+          next_fetch_at: new Date(),
+        },
+      });
+
+      pagesUpserted++;
+
+      const links = extractLinks(normalizedUrl, res.text);
+      for (const l of links) {
+        if (l.hostname !== source.domain) continue;
+        if (!isAllowedUrlForSource(l, source)) continue;
+        queue.push(l);
+      }
+    }
+
+    sourcesCompleted++;
+  }
+
+  const stoppedReason: "timeout" | "done" = deadline.isExpired() ? "timeout" : "done";
   const durationMs = Date.now() - startedAt;
 
   logRun({
@@ -446,7 +436,8 @@ export async function ingestWebKb(params: {
   stoppedReason: "timeout" | "done";
   durationMs: number;
 }> {
-  const limitPages = typeof params.limitPages === "number" ? params.limitPages : DEFAULT_INGEST_LIMIT_PAGES;
+  const limitPages =
+    typeof params.limitPages === "number" ? params.limitPages : DEFAULT_INGEST_LIMIT_PAGES;
   const now = new Date();
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
@@ -638,7 +629,10 @@ export async function ingestWebKb(params: {
     }
     msEmbed += Date.now() - tEmbed0;
 
-    if (vectors.length !== chunks.length || vectors.some((v) => !Array.isArray(v))) {
+    if (
+      vectors.length !== chunks.length ||
+      vectors.some((v) => !Array.isArray(v))
+    ) {
       pagesFailed++;
       const tDb0 = Date.now();
       await prisma.page.update({
