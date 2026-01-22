@@ -9,12 +9,12 @@
       "schedule": "*/15 * * * *"
     },
     {
-      "path": "/api/cron/web-kb-seed",
-      "schedule": "0 1 * * *"
+      "path": "/api/cron/web-kb-seed?maxPages=1500&maxDurationMs=6500",
+      "schedule": "0 3 * * *"
     },
     {
-      "path": "/api/cron/web-kb-ingest",
-      "schedule": "10 1 * * *"
+      "path": "/api/cron/web-kb-ingest?limitPages=1",
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/rag-ingest",
