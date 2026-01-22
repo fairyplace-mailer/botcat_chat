@@ -1,111 +1,44 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+
+import { CronLock } from "@/server/cron/cron-lock";
+import { logCleanupRun } from "@/server/cleanup/log";
 import { seedWebSources } from "@/server/rag/web-kb";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-const TASK_NAME = "web-kb-seed";
-
-function addMinutes(base: Date, minutes: number): Date {
-  return new Date(base.getTime() + minutes * 60 * 1000);
-}
-
-function toUtcIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-async function acquireDailyLock(params: {
-  name: string;
-  utcDateKey: string;
-  now: Date;
-}): Promise<boolean> {
-  const { name, utcDateKey, now } = params;
-
-  const lockedUntil = addMinutes(now, 20);
-
-  await prisma.cronLock.upsert({
-    where: { name },
-    create: {
-      name,
-      locked_at: new Date(0),
-      locked_until: new Date(0),
-      meta: null,
-    },
-    update: {},
-  });
-
-  const updated = await prisma.cronLock.updateMany({
-    where: {
-      name,
-      locked_until: { lt: now },
-      NOT: {
-        meta: {
-          equals: { dateKey: utcDateKey },
-        },
-      },
-    },
-    data: {
-      locked_at: now,
-      locked_until: lockedUntil,
-      meta: { dateKey: utcDateKey },
-    },
-  });
-
-  return updated.count === 1;
-}
 
 export async function GET(req: Request) {
-  const runStartedAt = new Date();
-  const utcDateKey = toUtcIsoDate(runStartedAt);
   const url = new URL(req.url);
+
+  // Temporary: no auth check yet (will be added per rag_spec)
+
   const force = url.searchParams.get("force") === "1";
 
-  if (!force) {
-    const acquired = await acquireDailyLock({
-      name: TASK_NAME,
-      utcDateKey,
-      now: runStartedAt,
-    });
-
-    if (!acquired) {
-      return NextResponse.json({ ok: true, skipped: true, reason: "locked" });
-    }
-  }
-
   try {
-    const result = await seedWebSources({
-      maxPagesPerSource: 250,
-    });
-
-    // Note: CleanupLog has no `meta` field. Detailed run metrics are logged to stdout
-    // by web-kb.ts for inspection in Vercel logs.
-    await prisma.cleanupLog.create({
-      data: {
-        task_name: TASK_NAME,
-        run_started_at: runStartedAt,
-        run_finished_at: new Date(),
-        deleted_attachments_count: 0,
-        deleted_conversations_count: 0,
-        errors: null,
+    const result = await CronLock.runOncePerDay({
+      lockName: "web-kb-seed",
+      dateKey: new Date().toISOString().slice(0, 10),
+      force,
+      fn: async () => {
+        return seedWebSources({
+          maxPages: 1500,
+          maxDurationMs: 6500,
+        });
       },
     });
 
-    return NextResponse.json({ ok: true, forced: force, ...result });
+    await logCleanupRun({
+      kind: "web-kb-seed",
+      ok: result.ok,
+    });
+
+    return NextResponse.json({ forced: force, ...result });
   } catch (e: any) {
     const msg = e?.message ?? String(e);
-
-    await prisma.cleanupLog.create({
-      data: {
-        task_name: TASK_NAME,
-        run_started_at: runStartedAt,
-        run_finished_at: new Date(),
-        deleted_attachments_count: 0,
-        deleted_conversations_count: 0,
-        errors: [{ scope: "fatal", error: msg }] as any,
-      },
+    await logCleanupRun({
+      kind: "web-kb-seed",
+      ok: false,
+      error: msg,
     });
-
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
