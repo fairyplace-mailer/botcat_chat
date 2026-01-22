@@ -12,7 +12,7 @@ export const openai = new OpenAI({
 export type BotCatTextModelKind = "chat" | "chat_strong" | "reasoning";
 
 /**
- *  Dynamic Model Selection (text).
+ * Dynamic Model Selection (text).
  * Source of truth: src/lib/env.ts
  */
 export function selectBotCatTextModel(kind: BotCatTextModelKind): string {
@@ -27,8 +27,12 @@ export function selectBotCatTextModel(kind: BotCatTextModelKind): string {
   }
 }
 
+/**
+ * RAG spec: embeddings must be fixed to text-embedding-3-small (1536 dims).
+ * Do not make this dynamic via env.
+ */
 export function selectBotCatEmbeddingModel(): string {
-  return env.OPENAI_MODEL_EMBEDDING;
+  return "text-embedding-3-small";
 }
 
 export function selectBotCatImageModel(quality: "standard" | "high" = "standard"): string {
