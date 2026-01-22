@@ -75,7 +75,7 @@ export async function GET(req: Request) {
 
   try {
     const result = await ingestWebKb({
-      maxPages: 15,
+      limitPages: 15,
     });
 
     // Note: CleanupLog has no `meta` field. Detailed run metrics are logged to stdout
