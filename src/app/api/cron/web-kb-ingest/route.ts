@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+
 import { prisma } from "@/lib/prisma";
+import { env } from "@/lib/env";
 import { ingestWebKb } from "@/server/rag/web-kb";
 
 export const runtime = "nodejs";
@@ -11,18 +13,17 @@ function addMinutes(base: Date, minutes: number): Date {
   return new Date(base.getTime() + minutes * 60 * 1000);
 }
 
-function toUtcIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function isAuthorized(req: Request): boolean {
+  const expected = env.CRON_SECRET;
+  if (!expected) return false;
+
+  const header = req.headers.get("authorization") ?? "";
+  return header === `Bearer ${expected}`;
 }
 
-async function acquireDailyLock(params: {
-  name: string;
-  utcDateKey: string;
-  now: Date;
-}): Promise<boolean> {
-  const { name, utcDateKey, now } = params;
-
-  const lockedUntil = addMinutes(now, 30);
+async function acquireMutexLock(params: { name: string; now: Date; ttlMinutes: number }) {
+  const { name, now, ttlMinutes } = params;
+  const lockedUntil = addMinutes(now, ttlMinutes);
 
   await prisma.cronLock.upsert({
     where: { name },
@@ -39,16 +40,11 @@ async function acquireDailyLock(params: {
     where: {
       name,
       locked_until: { lt: now },
-      NOT: {
-        meta: {
-          equals: { dateKey: utcDateKey },
-        },
-      },
     },
     data: {
       locked_at: now,
       locked_until: lockedUntil,
-      meta: { dateKey: utcDateKey },
+      meta: null,
     },
   });
 
@@ -56,16 +52,27 @@ async function acquireDailyLock(params: {
 }
 
 export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const runStartedAt = new Date();
-  const utcDateKey = toUtcIsoDate(runStartedAt);
   const url = new URL(req.url);
+
   const force = url.searchParams.get("force") === "1";
 
+  const limitPagesRaw = url.searchParams.get("limitPages");
+  const maxDurationRaw = url.searchParams.get("maxDurationMs");
+
+  const limitPages = limitPagesRaw ? Number(limitPagesRaw) : undefined;
+  const maxDurationMs = maxDurationRaw ? Number(maxDurationRaw) : undefined;
+
+  // Frequent task (*/2). Use a short mutex lock (NOT daily-lock).
   if (!force) {
-    const acquired = await acquireDailyLock({
+    const acquired = await acquireMutexLock({
       name: TASK_NAME,
-      utcDateKey,
       now: runStartedAt,
+      ttlMinutes: 2,
     });
 
     if (!acquired) {
@@ -75,7 +82,8 @@ export async function GET(req: Request) {
 
   try {
     const result = await ingestWebKb({
-      limitPages: 15,
+      limitPages: Number.isFinite(limitPages) ? limitPages : undefined,
+      maxDurationMs: Number.isFinite(maxDurationMs) ? maxDurationMs : undefined,
     });
 
     await prisma.cleanupLog.create({
