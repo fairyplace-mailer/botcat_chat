@@ -91,7 +91,8 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ ok: true, forced: force, ...result });
+    // `result` already contains `ok`, so avoid specifying it twice.
+    return NextResponse.json({ forced: force, ...result });
   } catch (e: any) {
     const msg = e?.message ?? String(e);
 
