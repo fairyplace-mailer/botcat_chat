@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+
 import { prisma } from "@/lib/prisma";
+import { env } from "@/lib/env";
 import { seedWebSources } from "@/server/rag/web-kb";
 
 export const runtime = "nodejs";
@@ -15,6 +17,14 @@ function toUtcIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function isAuthorized(req: Request): boolean {
+  const expected = env.CRON_SECRET;
+  if (!expected) return false;
+
+  const header = req.headers.get("authorization") ?? "";
+  return header === `Bearer ${expected}`;
+}
+
 async function acquireDailyLock(params: {
   name: string;
   utcDateKey: string;
@@ -22,7 +32,7 @@ async function acquireDailyLock(params: {
 }): Promise<boolean> {
   const { name, utcDateKey, now } = params;
 
-  const lockedUntil = addMinutes(now, 20);
+  const lockedUntil = addMinutes(now, 30);
 
   await prisma.cronLock.upsert({
     where: { name },
@@ -56,10 +66,21 @@ async function acquireDailyLock(params: {
 }
 
 export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const runStartedAt = new Date();
   const utcDateKey = toUtcIsoDate(runStartedAt);
   const url = new URL(req.url);
+
   const force = url.searchParams.get("force") === "1";
+
+  const maxPagesRaw = url.searchParams.get("maxPages");
+  const maxDurationRaw = url.searchParams.get("maxDurationMs");
+
+  const maxPages = maxPagesRaw ? Number(maxPagesRaw) : undefined;
+  const maxDurationMs = maxDurationRaw ? Number(maxDurationRaw) : undefined;
 
   if (!force) {
     const acquired = await acquireDailyLock({
@@ -75,11 +96,10 @@ export async function GET(req: Request) {
 
   try {
     const result = await seedWebSources({
-      maxPagesPerSource: 250,
+      maxPages: Number.isFinite(maxPages) ? maxPages : undefined,
+      maxDurationMs: Number.isFinite(maxDurationMs) ? maxDurationMs : undefined,
     });
 
-    // Note: CleanupLog has no `meta` field. Detailed run metrics are logged to stdout
-    // by web-kb.ts for inspection in Vercel logs.
     await prisma.cleanupLog.create({
       data: {
         task_name: TASK_NAME,
@@ -91,7 +111,7 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ ok: true, forced: force, ...result });
+    return NextResponse.json({ forced: force, ...result });
   } catch (e: any) {
     const msg = e?.message ?? String(e);
 

@@ -190,7 +190,7 @@ model Page {
   // web kb scheduling / freshness
   content_hash            String?
   last_seen_at            DateTime?
-  refresh_interval_hours  Int           @default(480)
+  refresh_interval_hours  Int           @default(24)
   next_fetch_at           DateTime?
 
   created_at DateTime      @default(now())

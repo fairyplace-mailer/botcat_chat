@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
-export const EMBEDDING_DIMS = 3072;
+// RAG spec: text-embedding-3-small → 1536 dims
+export const EMBEDDING_DIMS = 1536;
 
 function safeNumberString(n: number): string {
   if (!Number.isFinite(n)) throw new Error("embedding contains non-finite number");

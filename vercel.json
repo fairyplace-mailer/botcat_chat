@@ -5,19 +5,19 @@
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/cron/finalize-stale-conversations",
-      "schedule": "*/15 * * * *"
+      "path": "/api/cron/rag-ingest",
+      "schedule": "20 0 * * *"
     },
     {
-      "path": "/api/cron/web-kb-seed",
+      "path": "/api/cron/web-kb-seed?maxPages=1500&maxDurationMs=6500",
+      "schedule": "40 0 * * *"
+    },
+    {
+      "path": "/api/cron/web-kb-ingest?limitPages=1",
       "schedule": "0 1 * * *"
     },
     {
-      "path": "/api/cron/web-kb-ingest",
-      "schedule": "10 1 * * *"
-    },
-    {
-      "path": "/api/cron/rag-ingest",
+      "path": "/api/cron/finalize-stale-conversations",
       "schedule": "20 1 * * *"
     }
   ]
