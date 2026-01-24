@@ -456,6 +456,7 @@ export async function seedWebSources(params: {
 export async function ingestWebKb(params: {
   limitPages?: number;
   maxDurationMs?: number;
+  discoverLinks?: boolean;
 }): Promise<{
   ok: true;
   limitPages: number;
@@ -490,6 +491,9 @@ export async function ingestWebKb(params: {
   const now = new Date();
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
+  // Spec: optionally discover links during ingest (default false).
+  const discoverLinks = params.discoverLinks === true;
+
   // Claim due pages to avoid double-processing on rare concurrent runs.
   const claimed = await prisma.$transaction(
     async (tx: Prisma.TransactionClient) => {
@@ -506,6 +510,7 @@ export async function ingestWebKb(params: {
           url: true,
           content_hash: true,
           refresh_interval_hours: true,
+          site_id: true,
         },
       });
 
@@ -578,12 +583,14 @@ export async function ingestWebKb(params: {
       res = await fetchText(url);
     } catch {
       msFetch += Date.now() - tFetch0;
+      const tDb0 = Date.now();
       await prisma.page.update({
         where: { id: p.id },
         data: {
           next_fetch_at: addMinutes(now, 30),
         },
       });
+      msDb += Date.now() - tDb0;
       continue;
     }
     msFetch += Date.now() - tFetch0;
@@ -634,6 +641,54 @@ export async function ingestWebKb(params: {
     const nextHash = sha256(normalizeWhitespace(markdownish));
     msTransform += Date.now() - tTransform0;
 
+    // Optional discovery during ingest (best-effort, time-budget aware)
+    if (discoverLinks && !deadline.isExpired()) {
+      try {
+        const site = await prisma.site.findUnique({
+          where: { id: p.site_id },
+          select: { domain: true },
+        });
+        if (site?.domain) {
+          const source = WEB_SOURCES.find((s) => s.domain === site.domain);
+          if (source) {
+            const links = extractLinks(url, res.text);
+            // Keep a small cap to avoid runaway; seed is the primary discovery mechanism.
+            const capped = links.slice(0, 100);
+            for (const l of capped) {
+              if (deadline.isExpired()) break;
+              if (l.hostname !== source.domain) continue;
+              if (!isAllowedUrlForSource(source, l)) continue;
+
+              const key = normalizeUrlForKey(l).toString();
+              const tDb0 = Date.now();
+              await prisma.page.upsert({
+                where: { site_id_url: { site_id: p.site_id, url: key } },
+                create: {
+                  site_id: p.site_id,
+                  url: key,
+                  title: null,
+                  source: "page" as ContentSource,
+                  fetched_at: null,
+                  canonical_url: key,
+                  http_status: null,
+                  excluded_reason: null,
+                  last_seen_at: now,
+                  refresh_interval_hours: 24,
+                  next_fetch_at: now,
+                },
+                update: {
+                  last_seen_at: now,
+                },
+              });
+              msDb += Date.now() - tDb0;
+            }
+          }
+        }
+      } catch {
+        // ignore discovery failures
+      }
+    }
+
     if (p.content_hash && p.content_hash === nextHash) {
       skippedUnchanged++;
       const tDb0 = Date.now();
@@ -667,6 +722,14 @@ export async function ingestWebKb(params: {
       stoppedReason = "maxChunksPerPage";
     }
 
+    // Spec: embed budget (hard cap, keep batching)
+    if (chunks.length > maxEmbeddings) {
+      stoppedReason = "embed_budget_exhausted";
+      budgetHit = true;
+      // keep only the first N chunks
+      chunks.length = maxEmbeddings;
+    }
+
     const embeddingModel = selectBotCatEmbeddingModel();
 
     const tEmbed0 = Date.now();
@@ -684,6 +747,7 @@ export async function ingestWebKb(params: {
     } catch {
       embedFailures += 1;
       msEmbed += Date.now() - tEmbed0;
+      const tDb0 = Date.now();
       await prisma.page.update({
         where: { id: p.id },
         data: {
@@ -693,6 +757,7 @@ export async function ingestWebKb(params: {
           next_fetch_at: addMinutes(now, 30),
         },
       });
+      msDb += Date.now() - tDb0;
       continue;
     }
     msEmbed += Date.now() - tEmbed0;
@@ -774,6 +839,13 @@ export async function ingestWebKb(params: {
     stoppedReason = "time_budget_exhausted";
     budgetHit = true;
   }
+
+  // Ensure timing metrics are always non-negative integers
+  msFetch = Math.max(0, Math.trunc(msFetch));
+  msTransform = Math.max(0, Math.trunc(msTransform));
+  msChunk = Math.max(0, Math.trunc(msChunk));
+  msEmbed = Math.max(0, Math.trunc(msEmbed));
+  msDb = Math.max(0, Math.trunc(msDb));
 
   logRun({
     run: "ingest",
