@@ -4,7 +4,7 @@ import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
 import type { ContentSource, SiteType } from "@prisma/client";
 import {
   isAllowedUrlForSource,
-  type WebSourceConfig,
+  type WebSource,
   WEB_SOURCES,
 } from "@/server/rag/web-sources";
 import crypto from "node:crypto";
@@ -379,7 +379,12 @@ async function writeSectionsWithEmbeddings(params: {
     }
 
     await prisma.section.upsert({
-      where: { page_id_content_hash: { page_id: params.pageId, content_hash: contentHash } },
+      where: {
+        page_id_content_hash: {
+          page_id: params.pageId,
+          content_hash: contentHash,
+        },
+      },
       create: {
         page_id: params.pageId,
         content,
@@ -437,7 +442,7 @@ function htmlToMarkdownText(html: string, title: string | null): string {
 }
 
 export async function crawlWebSources(params?: {
-  sources?: WebSourceConfig[];
+  sources?: WebSource[];
   now?: Date;
 }): Promise<{
   sourcesTotal: number;
@@ -486,7 +491,7 @@ export async function crawlWebSources(params?: {
       }
     }
 
-    while (queue.length > 0 && seen.size < source.maxPagesPerRun) {
+    while (queue.length > 0 && seen.size < (source.maxPagesPerRun ?? 0)) {
       const url = queue.shift()!;
       const normalizedUrl = normalizeUrlForKey(url);
       const key = normalizedUrl.toString();
@@ -494,7 +499,7 @@ export async function crawlWebSources(params?: {
       seen.add(key);
       pagesVisited++;
 
-      if (!isAllowedUrlForSource(normalizedUrl, source)) {
+      if (!isAllowedUrlForSource(source, normalizedUrl)) {
         pagesIgnoredByRules++;
         continue;
       }
@@ -566,7 +571,7 @@ export async function crawlWebSources(params?: {
       const links = extractLinks(normalizedUrl, res.text);
       for (const l of links) {
         if (l.hostname !== source.domain) continue;
-        if (!isAllowedUrlForSource(l, source)) continue;
+        if (!isAllowedUrlForSource(source, l)) continue;
         if (!isAllowedByRobots({ url: l, disallowRules: robotsDisallow })) continue;
         queue.push(l);
       }
