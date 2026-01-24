@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import { openai, selectBotCatEmbeddingModel } from "@/lib/openai";
 import {
   isAllowedUrlForSource,
-  type WebSourceConfig,
+  type WebSource,
   WEB_SOURCES,
 } from "@/server/rag/web-sources";
 import { updateSectionVector } from "@/server/rag/pgvector";
@@ -284,7 +284,11 @@ function chunkTextByPseudoTokens(
   const step = Math.max(1, chunkChars - overlapChars);
 
   const out: string[] = [];
-  for (let start = 0; start < t.length && out.length < params.maxChunks; start += step) {
+  for (
+    let start = 0;
+    start < t.length && out.length < params.maxChunks;
+    start += step
+  ) {
     const end = Math.min(t.length, start + chunkChars);
     const slice = t.slice(start, end).trim();
     if (slice) out.push(slice);
@@ -295,7 +299,7 @@ function chunkTextByPseudoTokens(
 }
 
 export async function seedWebSources(params: {
-  sources?: WebSourceConfig[];
+  sources?: WebSource[];
   maxPages?: number;
   maxDurationMs?: number;
 }): Promise<{
@@ -398,7 +402,7 @@ export async function seedWebSources(params: {
       seen.add(key);
       discoveredTotal++;
 
-      const isAllowed = isAllowedUrlForSource(normalizedUrl, source);
+      const isAllowed = isAllowedUrlForSource(source, normalizedUrl);
       if (!isAllowed) continue;
       allowed++;
 
@@ -461,7 +465,7 @@ export async function seedWebSources(params: {
       const links = extractLinks(normalizedUrl, res.text);
       for (const l of links) {
         if (l.hostname !== source.domain) continue;
-        if (!isAllowedUrlForSource(l, source)) continue;
+        if (!isAllowedUrlForSource(source, l)) continue;
         queue.push(l);
       }
     }
@@ -553,35 +557,37 @@ export async function ingestWebKb(params: {
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
   // Claim due pages to avoid double-processing on rare concurrent runs.
-  const claimed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    const due = await tx.page.findMany({
-      where: {
-        site: { type: "external" },
-        excluded_reason: null,
-        OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
-      },
-      take: limitPages,
-      orderBy: [{ next_fetch_at: "asc" }],
-      select: {
-        id: true,
-        url: true,
-        content_hash: true,
-        refresh_interval_hours: true,
-      },
-    });
-
-    const ids = due.map((p) => p.id);
-    if (ids.length > 0) {
-      await tx.page.updateMany({
-        where: { id: { in: ids } },
-        data: {
-          next_fetch_at: addMinutes(now, 10),
+  const claimed = await prisma.$transaction(
+    async (tx: Prisma.TransactionClient) => {
+      const due = await tx.page.findMany({
+        where: {
+          site: { type: "external" },
+          excluded_reason: null,
+          OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
+        },
+        take: limitPages,
+        orderBy: [{ next_fetch_at: "asc" }],
+        select: {
+          id: true,
+          url: true,
+          content_hash: true,
+          refresh_interval_hours: true,
         },
       });
-    }
 
-    return due;
-  });
+      const ids = due.map((p) => p.id);
+      if (ids.length > 0) {
+        await tx.page.updateMany({
+          where: { id: { in: ids } },
+          data: {
+            next_fetch_at: addMinutes(now, 10),
+          },
+        });
+      }
+
+      return due;
+    }
+  );
 
   let fetched = 0;
   let stored = 0;
@@ -757,7 +763,10 @@ export async function ingestWebKb(params: {
     }
     msEmbed += Date.now() - tEmbed0;
 
-    if (vectors.length !== chunks.length || vectors.some((v) => !Array.isArray(v))) {
+    if (
+      vectors.length !== chunks.length ||
+      vectors.some((v) => !Array.isArray(v))
+    ) {
       embedFailures += 1;
       const tDb0 = Date.now();
       await prisma.page.update({
