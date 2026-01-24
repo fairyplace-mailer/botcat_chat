@@ -557,22 +557,16 @@ export async function ingestWebKb(params: {
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
   // Claim due pages to avoid double-processing on rare concurrent runs.
-  // NOTE: next_fetch_at exists in the Prisma schema, but if the local Prisma Client
-  // wasn't regenerated after the migration, TS types won't include it. We keep the
-  // query typed via `as any` to avoid blocking builds in that state.
   const claimed = await prisma.$transaction(
     async (tx: Prisma.TransactionClient) => {
       const due = await tx.page.findMany({
         where: {
           site: { type: "external" },
           excluded_reason: null,
-          OR: [
-            { next_fetch_at: null },
-            { next_fetch_at: { lte: now } },
-          ],
-        } as any,
+          OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
+        },
         take: limitPages,
-        orderBy: [{ next_fetch_at: "asc" }] as any,
+        orderBy: [{ next_fetch_at: "asc" }],
         select: {
           id: true,
           url: true,
