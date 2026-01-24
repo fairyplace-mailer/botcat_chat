@@ -71,6 +71,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
 
   const force = url.searchParams.get("force") === "1";
+  const discoverLinks = url.searchParams.get("discoverLinks") === "1";
 
   const limitPagesRaw = url.searchParams.get("limitPages");
   const maxDurationRaw = url.searchParams.get("maxDurationMs");
@@ -95,6 +96,7 @@ export async function GET(req: Request) {
     const result = await ingestWebKb({
       limitPages: Number.isFinite(limitPages) ? limitPages : undefined,
       maxDurationMs: Number.isFinite(maxDurationMs) ? maxDurationMs : undefined,
+      discoverLinks,
     });
 
     await prisma.cleanupLog.create({
@@ -108,7 +110,7 @@ export async function GET(req: Request) {
       },
     });
 
-    return NextResponse.json({ forced: force, ...result });
+    return NextResponse.json({ forced: force, discoverLinks, ...result });
   } catch (e: any) {
     const msg = e?.message ?? String(e);
 

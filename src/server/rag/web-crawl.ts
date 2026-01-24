@@ -9,6 +9,12 @@ import {
 } from "@/server/rag/web-sources";
 import crypto from "node:crypto";
 import { marked } from "marked";
+import {
+  extractMainContentHtml,
+  extractTitle,
+  normalizeWhitespace,
+  stripHtmlToText,
+} from "@/server/rag/html-to-md";
 
 /**
  * @deprecated Use /api/cron/web-kb-seed + /api/cron/web-kb-ingest and src/server/rag/web-kb.ts.
@@ -20,10 +26,6 @@ const FETCH_TIMEOUT_MS = 20_000;
 
 function sha256(text: string): string {
   return crypto.createHash("sha256").update(text).digest("hex");
-}
-
-function normalizeWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
 }
 
 function normalizeUrlForKey(input: URL): URL {
@@ -57,70 +59,6 @@ function normalizeUrlForKey(input: URL): URL {
   for (const [k, v] of entries) next.searchParams.append(k, v);
 
   return next;
-}
-
-function stripHtmlToText(html: string): string {
-  // Very simple & robust extraction without DOM dependencies.
-  // 1) Remove script/style/svg/noscript
-  let s = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
-
-  // 2) Convert some block tags to newlines
-  s = s.replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr|\/section|\/article)>/gi, "\n");
-
-  // 3) Drop remaining tags
-  s = s.replace(/<[^>]+>/g, " ");
-
-  // 4) Decode minimal entities (enough for our KB)
-  s = s
-    .replaceAll("&nbsp;", " ")
-    .replaceAll("&amp;", "&")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#039;", "'");
-
-  // 5) Normalize
-  return normalizeWhitespace(s);
-}
-
-function extractTitle(html: string): string | null {
-  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!m) return null;
-  return normalizeWhitespace(stripHtmlToText(m[1]));
-}
-
-function extractMainContentHtml(html: string): string {
-  // Heuristic extraction without DOM:
-  // 1) Try <main> ... </main>
-  // 2) Else try <article>
-  // 3) Else choose the largest <section>
-  // 4) Else fall back to full html
-  const tryTag = (tag: string): string | null => {
-    const re = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
-    const m = html.match(re);
-    return m?.[1] ? String(m[1]) : null;
-  };
-
-  const main = tryTag("main");
-  if (main && main.length > 200) return main;
-
-  const article = tryTag("article");
-  if (article && article.length > 200) return article;
-
-  const sectionRe = /<section\b[^>]*>([\s\S]*?)<\/section>/gi;
-  let best: string | null = null;
-  let m: RegExpExecArray | null;
-  while ((m = sectionRe.exec(html))) {
-    const body = m[1] ?? "";
-    if (!best || body.length > best.length) best = body;
-  }
-  if (best && best.length > 200) return best;
-
-  return html;
 }
 
 function extractLinks(baseUrl: URL, html: string): URL[] {
@@ -166,7 +104,9 @@ function extractImages(
       const u = new URL(rawSrc, baseUrl);
       const normalized = normalizeUrlForKey(u);
       const altM = tag.match(altRe);
-      const alt = altM ? normalizeWhitespace(stripHtmlToText(altM[2] ?? "")) : null;
+      const alt = altM
+        ? normalizeWhitespace(stripHtmlToText(altM[2] ?? ""))
+        : null;
       imgs.push({ url: normalized, alt });
     } catch {
       // ignore
@@ -504,7 +444,9 @@ export async function crawlWebSources(params?: {
         continue;
       }
 
-      if (!isAllowedByRobots({ url: normalizedUrl, disallowRules: robotsDisallow })) {
+      if (
+        !isAllowedByRobots({ url: normalizedUrl, disallowRules: robotsDisallow })
+      ) {
         pagesDisallowedByRobots++;
         continue;
       }
