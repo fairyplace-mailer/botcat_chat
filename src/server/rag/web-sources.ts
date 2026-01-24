@@ -38,15 +38,22 @@ export const WEB_SOURCES: WebSource[] = [
     // Hobby-friendly cap: seed must finish fast.
     maxPagesPerRun: 1500,
     denyPathSubstrings: [
+      // auth/account/checkout flows
       "/account",
       "/checkout",
       "/cart",
       "/search",
       "/login",
       "/register",
-      "/wishlist",
       "/compare",
       "/my-",
+
+      // explicitly excluded (noise / not needed for POD KB)
+      "/Wishlist",
+      "/affiliate",
+      "/blog",
+      "/contact",
+      "/face-tool/",
     ],
   },
   {
