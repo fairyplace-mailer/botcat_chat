@@ -563,10 +563,16 @@ export async function ingestWebKb(params: {
         where: {
           site: { type: "external" },
           excluded_reason: null,
-          OR: [{ next_fetch_at: null }, { next_fetch_at: { lte: now } }],
-        },
+          // NOTE: next_fetch_at exists in schema/migrations, but if the local prisma
+          // client hasn't been regenerated after migrations, TS types won't include it.
+          // In that case, run `npx prisma generate`.
+          OR: [
+            { next_fetch_at: null as any },
+            { next_fetch_at: { lte: now } as any },
+          ],
+        } as any,
         take: limitPages,
-        orderBy: [{ next_fetch_at: "asc" }],
+        orderBy: [{ next_fetch_at: "asc" as any }],
         select: {
           id: true,
           url: true,
