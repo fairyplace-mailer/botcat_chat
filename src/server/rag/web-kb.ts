@@ -7,7 +7,6 @@ import {
   type WebSourceConfig,
   WEB_SOURCES,
 } from "@/server/rag/web-sources";
-import { chunkMarkdownByHeadings } from "@/server/rag/chunking";
 import { updateSectionVector } from "@/server/rag/pgvector";
 import type { Prisma } from "@prisma/client";
 
@@ -19,6 +18,10 @@ const DEFAULT_MAX_DURATION_MS = 6500;
 const DEFAULT_SEED_MAX_PAGES = 500;
 const DEFAULT_INGEST_LIMIT_PAGES = 1;
 const MAX_CHUNKS_PER_PAGE = 8;
+
+// Tokenization is intentionally not used (too slow for Vercel Hobby).
+// We implement "pseudo-tokens" based on chars to keep spec-level knobs stable.
+const CHARS_PER_PSEUDO_TOKEN = 4;
 
 type RunLog = {
   run: string;
@@ -265,6 +268,32 @@ function classifyRefreshIntervalHours(url: URL): number {
   return 24;
 }
 
+function chunkTextByPseudoTokens(
+  text: string,
+  params: {
+    chunkTokens: number;
+    overlapTokens: number;
+    maxChunks: number;
+  }
+): string[] {
+  const t = text.trim();
+  if (!t) return [];
+
+  const chunkChars = Math.max(200, params.chunkTokens * CHARS_PER_PSEUDO_TOKEN);
+  const overlapChars = Math.max(0, params.overlapTokens * CHARS_PER_PSEUDO_TOKEN);
+  const step = Math.max(1, chunkChars - overlapChars);
+
+  const out: string[] = [];
+  for (let start = 0; start < t.length && out.length < params.maxChunks; start += step) {
+    const end = Math.min(t.length, start + chunkChars);
+    const slice = t.slice(start, end).trim();
+    if (slice) out.push(slice);
+    if (end >= t.length) break;
+  }
+
+  return out;
+}
+
 export async function seedWebSources(params: {
   sources?: WebSourceConfig[];
   maxPages?: number;
@@ -289,7 +318,8 @@ export async function seedWebSources(params: {
       : DEFAULT_SEED_MAX_PAGES;
   const deadline = makeDeadline(params.maxDurationMs ?? DEFAULT_MAX_DURATION_MS);
 
-  const sources = params.sources ?? WEB_SOURCES.filter((s) => s.type === "external");
+  const sources =
+    params.sources ?? WEB_SOURCES.filter((s) => s.type === "external");
 
   const startUrls = sources.flatMap((s) => s.startUrls);
 
@@ -300,8 +330,10 @@ export async function seedWebSources(params: {
   let updated = 0;
   const sample: string[] = [];
 
-  let stoppedReason: "time_budget_exhausted" | "max_pages" | "start_fetch_failed" =
-    "time_budget_exhausted";
+  let stoppedReason:
+    | "time_budget_exhausted"
+    | "max_pages"
+    | "start_fetch_failed" = "time_budget_exhausted";
 
   let startStatus: number | null = null;
 
@@ -349,7 +381,11 @@ export async function seedWebSources(params: {
       }
     }
 
-    while (queue.length > 0 && seen.size < perSourceCap && discoveredTotal < maxPages) {
+    while (
+      queue.length > 0 &&
+      seen.size < perSourceCap &&
+      discoveredTotal < maxPages
+    ) {
       if (deadline.isExpired()) {
         stoppedReason = "time_budget_exhausted";
         break;
@@ -402,6 +438,7 @@ export async function seedWebSources(params: {
           excluded_reason: null,
           last_seen_at: new Date(),
           refresh_interval_hours: refreshIntervalHours,
+          // Spec: for new URLs set nextFetchAt=now.
           next_fetch_at: new Date(),
         },
         update: {
@@ -410,7 +447,9 @@ export async function seedWebSources(params: {
           excluded_reason: null,
           last_seen_at: new Date(),
           refresh_interval_hours: refreshIntervalHours,
-          next_fetch_at: new Date(),
+          // Important: do NOT reset next_fetch_at on update.
+          // This preserves the existing refresh schedule, which is critical
+          // for Vercel Hobby time budgets.
         },
       });
 
@@ -433,25 +472,13 @@ export async function seedWebSources(params: {
     }
   }
 
-  if (!deadline.isExpired() && discoveredTotal < maxPages && stoppedReason !== "start_fetch_failed") {
+  if (
+    !deadline.isExpired() &&
+    discoveredTotal < maxPages &&
+    stoppedReason !== "start_fetch_failed"
+  ) {
+    // Spec doesn't define "done" for seed; keep within the allowed set.
     stoppedReason = "time_budget_exhausted";
-    // If we finished naturally, show max_pages only when hit.
-    if (discoveredTotal === 0 || fetched === 0) {
-      // keep time_budget_exhausted; seed often stops early on hobby
-    }
-  }
-
-  // if not expired and didn't hit max pages and no start failure -> treat as time budget exhausted or done;
-  if (!deadline.isExpired() && discoveredTotal < maxPages && stoppedReason !== "start_fetch_failed") {
-    // We have no explicit "done" in spec for seed; use time budget exhausted only when expired.
-    // Use max_pages when hit max.
-    // Otherwise treat as time budget exhausted is misleading; keep max_pages when hit and start_fetch_failed when failed.
-    stoppedReason = "time_budget_exhausted";
-  }
-
-  if (!deadline.isExpired() && discoveredTotal < maxPages && stoppedReason === "time_budget_exhausted") {
-    // if actually finished by draining queues quickly within budget, we still return time_budget_exhausted per spec's set.
-    // (Spec doesn't define "done" for seed)
   }
 
   const durationMs = Date.now() - startedAt;
@@ -572,6 +599,7 @@ export async function ingestWebKb(params: {
   let msDb = 0;
 
   // Spec defaults
+  // NOTE: tokens are pseudo-tokens (chars/4) for Vercel Hobby performance.
   const chunkTokens = 1100;
   const overlapTokens = 150;
   const maxChunksPerPage = MAX_CHUNKS_PER_PAGE;
@@ -688,13 +716,11 @@ export async function ingestWebKb(params: {
     msDb += Date.now() - tDbDelete0;
 
     const tChunk0 = Date.now();
-    const chunks = chunkMarkdownByHeadings(markdownish, {
-      maxChars: 2400,
-      minChars: 200,
-    })
-      .map((c) => c.contentMd.trim())
-      .filter(Boolean)
-      .slice(0, maxChunksPerPage);
+    const chunks = chunkTextByPseudoTokens(markdownish, {
+      chunkTokens,
+      overlapTokens,
+      maxChunks: maxChunksPerPage,
+    });
     msChunk += Date.now() - tChunk0;
 
     if (chunks.length >= maxChunksPerPage) {
