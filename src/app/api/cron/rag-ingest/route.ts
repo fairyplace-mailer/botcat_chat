@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { env } from "@/lib/env";
 import { prisma } from "@/server/db";
 import { ingestReferenceContext } from "@/server/rag/ingest";
 
@@ -14,6 +15,25 @@ function addMinutes(base: Date, minutes: number): Date {
 function toUtcIsoDate(d: Date): string {
   // YYYY-MM-DD in UTC
   return d.toISOString().slice(0, 10);
+}
+
+function getBearerToken(req: Request): string | null {
+  const header = (req.headers.get("authorization") ?? "").trim();
+  if (!header) return null;
+
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+
+  const token = match[1]?.trim();
+  return token ? token : null;
+}
+
+function isAuthorized(req: Request): boolean {
+  const expected = (env.CRON_SECRET ?? "").trim();
+  if (!expected) return false;
+
+  const token = getBearerToken(req);
+  return token === expected;
 }
 
 async function acquireDailyLock(params: {
@@ -56,7 +76,11 @@ async function acquireDailyLock(params: {
   return updated.count === 1;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
   const runStartedAt = new Date();
   const utcDateKey = toUtcIsoDate(runStartedAt);
 
