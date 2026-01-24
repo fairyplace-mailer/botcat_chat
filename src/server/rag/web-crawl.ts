@@ -379,7 +379,12 @@ async function writeSectionsWithEmbeddings(params: {
     }
 
     await prisma.section.upsert({
-      where: { page_id_content_hash: { page_id: params.pageId, content_hash: contentHash } },
+      where: {
+        page_id_content_hash: {
+          page_id: params.pageId,
+          content_hash: contentHash,
+        },
+      },
       create: {
         page_id: params.pageId,
         content,
@@ -582,7 +587,6 @@ export async function crawlWebSources(params?: {
     pagesDisallowedByRobots,
     pagesNonHtml,
     pagesFailedFetch,
-    pagesIgnoredByRules,
     sectionsWritten,
     imagesWritten,
   };
