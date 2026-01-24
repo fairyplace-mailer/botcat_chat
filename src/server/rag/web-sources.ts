@@ -55,6 +55,43 @@ const DEFAULT_DENY_PATH_SUBSTRINGS = [
   "/search",
 ];
 
+const DENY_EXTENSIONS = new Set([
+  ".pdf",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".ico",
+  ".css",
+  ".js",
+  ".mjs",
+  ".json",
+  ".xml",
+  ".txt",
+  ".zip",
+  ".rar",
+  ".7z",
+  ".tar",
+  ".gz",
+  ".mp4",
+  ".mov",
+  ".webm",
+  ".mp3",
+  ".wav",
+]);
+
+function hasDeniedExtension(pathname: string): boolean {
+  const p = pathname.toLowerCase();
+  // Ignore trailing slashes.
+  const trimmed = p.endsWith("/") ? p.slice(0, -1) : p;
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot === -1) return false;
+  const ext = trimmed.slice(lastDot);
+  return DENY_EXTENSIONS.has(ext);
+}
+
 /**
  * Spoonflower is extremely large due to user-generated design catalogs.
  * Keep crawl strictly within curated informational sections.
@@ -178,6 +215,12 @@ export function getAllowedPrefixesForSource(source: WebSourceConfig): string[] {
 export function isAllowedUrlForSource(url: URL, source: WebSourceConfig): boolean {
   if (url.hostname !== source.domain) return false;
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+
+  // Fast rejects: avoid queueing obvious non-html assets during seed.
+  const protocol = url.protocol.toLowerCase();
+  if (protocol === "mailto:" || protocol === "tel:") return false;
+
+  if (hasDeniedExtension(url.pathname)) return false;
 
   const prefixes = getAllowedPrefixesForSource(source);
   const okPrefix = prefixes.some(
