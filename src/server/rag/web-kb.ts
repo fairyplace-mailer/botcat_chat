@@ -9,6 +9,12 @@ import {
 } from "@/server/rag/web-sources";
 import { updateSectionVector } from "@/server/rag/pgvector";
 import type { Prisma } from "@prisma/client";
+import {
+  extractMainContentHtml,
+  extractTitle,
+  htmlToMarkdownishForHash,
+  normalizeWhitespace,
+} from "@/server/rag/html-to-md";
 
 const USER_AGENT = "BotCat/1.0 (+https://www.fairyplace.biz)";
 const FETCH_TIMEOUT_MS = 20_000;
@@ -55,10 +61,6 @@ function addMinutes(base: Date, minutes: number): Date {
   return new Date(base.getTime() + minutes * 60 * 1000);
 }
 
-function normalizeWhitespace(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
-
 function normalizeUrlForKey(input: URL): URL {
   const u = new URL(input.toString());
   u.hash = "";
@@ -90,74 +92,6 @@ function normalizeUrlForKey(input: URL): URL {
   for (const [k, v] of entries) next.searchParams.append(k, v);
 
   return next;
-}
-
-function stripHtmlToText(html: string): string {
-  let s = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ");
-
-  s = s.replace(
-    /<(br|\/p|\/div|\/li|\/h\d|\/tr|\/section|\/article)>/gi,
-    "\n"
-  );
-  s = s.replace(/<[^>]+>/g, " ");
-
-  s = s
-    .replaceAll("&nbsp;", " ")
-    .replaceAll("&amp;", "&")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#039;", "'");
-
-  return normalizeWhitespace(s);
-}
-
-function extractTitle(html: string): string | null {
-  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!m) return null;
-  return normalizeWhitespace(stripHtmlToText(m[1]));
-}
-
-function extractMainContentHtml(html: string): string {
-  const tryTag = (tag: string): string | null => {
-    const re = new RegExp(
-      `<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-      "i"
-    );
-    const m = html.match(re);
-    return m?.[1] ? String(m[1]) : null;
-  };
-
-  const main = tryTag("main");
-  if (main && main.length > 200) return main;
-
-  const article = tryTag("article");
-  if (article && article.length > 200) return article;
-
-  const sectionRe = /<section\b[^>]*>([\s\S]*?)<\/section>/gi;
-  let best: string | null = null;
-  let m: RegExpExecArray | null;
-  while ((m = sectionRe.exec(html))) {
-    const body = m[1] ?? "";
-    if (!best || body.length > best.length) best = body;
-  }
-  if (best && best.length > 200) return best;
-
-  return html;
-}
-
-function htmlToMarkdownishForHash(html: string, title: string | null): string {
-  // NOTE: Spec says "use existing HTML->Markdown converter".
-  // Project currently uses a fast HTML->text approach. We keep it deterministic
-  // and stable for hashing, and treat it as markdown-ish content.
-  const mainHtml = extractMainContentHtml(html);
-  const text = stripHtmlToText(mainHtml);
-  if (title) return `# ${title}\n\n${text}`;
-  return text;
 }
 
 function extractLinks(baseUrl: URL, html: string): URL[] {
