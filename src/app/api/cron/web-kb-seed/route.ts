@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
 import { seedWebSources } from "@/server/rag/web-kb";
+import { WEB_SOURCES } from "@/server/rag/web-sources";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,6 +83,22 @@ export async function GET(req: Request) {
   const maxPages = maxPagesRaw ? Number(maxPagesRaw) : undefined;
   const maxDurationMs = maxDurationRaw ? Number(maxDurationRaw) : undefined;
 
+  const sourceId = (url.searchParams.get("source") ?? "").trim();
+  const sources = sourceId
+    ? WEB_SOURCES.filter((s) => s.id === sourceId)
+    : undefined;
+
+  if (sourceId && (!sources || sources.length === 0)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `unknown source: ${sourceId}`,
+        allowedSources: WEB_SOURCES.map((s) => s.id),
+      },
+      { status: 400 }
+    );
+  }
+
   if (!force) {
     const acquired = await acquireDailyLock({
       name: TASK_NAME,
@@ -96,6 +113,7 @@ export async function GET(req: Request) {
 
   try {
     const result = await seedWebSources({
+      sources,
       maxPages: Number.isFinite(maxPages) ? maxPages : undefined,
       maxDurationMs: Number.isFinite(maxDurationMs) ? maxDurationMs : undefined,
     });
