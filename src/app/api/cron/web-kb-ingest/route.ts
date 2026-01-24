@@ -13,12 +13,23 @@ function addMinutes(base: Date, minutes: number): Date {
   return new Date(base.getTime() + minutes * 60 * 1000);
 }
 
+function getBearerToken(req: Request): string | null {
+  const header = (req.headers.get("authorization") ?? "").trim();
+  if (!header) return null;
+
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+
+  const token = match[1]?.trim();
+  return token ? token : null;
+}
+
 function isAuthorized(req: Request): boolean {
-  const expected = env.CRON_SECRET;
+  const expected = (env.CRON_SECRET ?? "").trim();
   if (!expected) return false;
 
-  const header = req.headers.get("authorization") ?? "";
-  return header === `Bearer ${expected}`;
+  const token = getBearerToken(req);
+  return token === expected;
 }
 
 async function acquireMutexLock(params: { name: string; now: Date; ttlMinutes: number }) {
