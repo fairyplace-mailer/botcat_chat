@@ -370,6 +370,7 @@ export async function POST(req: Request) {
   const systemPrompt = buildBotCatSystemPrompt({
     sessionSummaryBlock,
     referenceContextBlock,
+    webContextBlock,
     imageInstructionBlock,
   });
 
@@ -418,7 +419,7 @@ export async function POST(req: Request) {
   const messages: any[] = [
     {
       role: "system",
-      content: `${systemPrompt}\n\n${referenceContextBlock}\n\n${webContextBlock}`.trim(),
+      content: systemPrompt,
     },
   ];
 
