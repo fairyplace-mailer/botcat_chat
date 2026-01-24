@@ -2,11 +2,20 @@ export type WebSourceType = "external" | "wix";
 
 export interface WebSource {
   id: string;
+  /** Human-friendly label (stored in Site.name) */
+  name: string;
   type: WebSourceType;
   domain: string;
   startUrls: string[];
+  /** ContentSource used when storing sections/pages */
+  source: "page";
+  /** Primary language hint (stored in Site.primary_language) */
+  primaryLanguage: string;
   /** How frequently pages from this source should be refreshed */
   refreshIntervalHours: number;
+  /** Optional cap per run for seed/crawl */
+  maxPagesPerRun?: number;
+
   /** Optional mode-specific allow rules */
   mode?: "prefix" | "curated";
   /** Only allow URLs under these path prefixes (if mode === "curated") */
@@ -18,11 +27,16 @@ export interface WebSource {
 export const WEB_SOURCES: WebSource[] = [
   {
     id: "bagsoflove",
+    name: "Bags of Love",
     type: "external",
     domain: "www.bagsoflove.com",
     startUrls: ["https://www.bagsoflove.com/"],
+    source: "page",
+    primaryLanguage: "en",
     refreshIntervalHours: 24 * 30,
     mode: "prefix",
+    // Hobby-friendly cap: seed must finish fast.
+    maxPagesPerRun: 1500,
     denyPathSubstrings: [
       "/account",
       "/checkout",
@@ -37,10 +51,15 @@ export const WEB_SOURCES: WebSource[] = [
   },
   {
     id: "spoonflower",
+    name: "Spoonflower Help/Info",
     type: "external",
     domain: "www.spoonflower.com",
     startUrls: ["https://www.spoonflower.com/en"],
+    source: "page",
+    primaryLanguage: "en",
     refreshIntervalHours: 24 * 30,
+    // Curated list is smaller; still cap for safety.
+    maxPagesPerRun: 1500,
     mode: "curated",
     allowPathPrefixes: [
       "/en/help",
@@ -113,7 +132,7 @@ function hasDeniedExtension(pathname: string): boolean {
 export function isAllowedUrlForSource(source: WebSource, url: URL): boolean {
   if (url.hostname !== source.domain) return false;
 
-  // Only crawl http(s) URLs. Non-http schemes (mailto/tel/etc.) are rejected here.
+  // Only crawl http(s) URLs.
   if (url.protocol !== "https:" && url.protocol !== "http:") return false;
 
   if (hasDeniedExtension(url.pathname)) return false;
