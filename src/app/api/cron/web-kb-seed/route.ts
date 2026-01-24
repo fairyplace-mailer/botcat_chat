@@ -18,12 +18,24 @@ function toUtcIsoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function getBearerToken(req: Request): string | null {
+  const header = (req.headers.get("authorization") ?? "").trim();
+  if (!header) return null;
+
+  // Be tolerant to case and extra spaces: "Bearer <token>"
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+
+  const token = match[1]?.trim();
+  return token ? token : null;
+}
+
 function isAuthorized(req: Request): boolean {
-  const expected = env.CRON_SECRET;
+  const expected = (env.CRON_SECRET ?? "").trim();
   if (!expected) return false;
 
-  const header = req.headers.get("authorization") ?? "";
-  return header === `Bearer ${expected}`;
+  const token = getBearerToken(req);
+  return token === expected;
 }
 
 async function acquireDailyLock(params: {
@@ -84,9 +96,7 @@ export async function GET(req: Request) {
   const maxDurationMs = maxDurationRaw ? Number(maxDurationRaw) : undefined;
 
   const sourceId = (url.searchParams.get("source") ?? "").trim();
-  const sources = sourceId
-    ? WEB_SOURCES.filter((s) => s.id === sourceId)
-    : undefined;
+  const sources = sourceId ? WEB_SOURCES.filter((s) => s.id === sourceId) : undefined;
 
   if (sourceId && (!sources || sources.length === 0)) {
     return NextResponse.json(
