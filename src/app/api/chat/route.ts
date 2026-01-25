@@ -39,6 +39,41 @@ function isImage(att: BotCatAttachment) {
   return Boolean(att.mimeType && att.mimeType.startsWith("image/"));
 }
 
+function isLikelyImageRequest(text: string): boolean {
+  const t = (text || "").toLowerCase();
+  const hints = [
+    // EN
+    "generate an image",
+    "generate image",
+    "create an image",
+    "create image",
+    "make an image",
+    "make image",
+    "draw",
+    "illustrate",
+    "render",
+    "photorealistic",
+    // RU
+    "сгенерируй картин",
+    "сгенерируй изображ",
+    "сделай картин",
+    "сделай изображ",
+    "создай картин",
+    "создай изображ",
+    "нарисуй",
+    "нарисуешь",
+    "отрисуй",
+    "иллюстрац",
+    "рендер",
+    "фотореалист",
+    // UA
+    "згенеруй зображ",
+    "намалюй",
+    "фотореаліст",
+  ];
+  return hints.some((h) => t.includes(h));
+}
+
 function buildExtractedDocumentsBlock(extractedDocuments: any[]): string {
   if (!Array.isArray(extractedDocuments) || extractedDocuments.length === 0) return "";
 
@@ -123,6 +158,41 @@ async function generateBotImagePng(prompt: string): Promise<{
     .slice(0, 6)}.png`;
 
   return { fileName, mimeType: "image/png", bytes, quality, model, modelReason: reason };
+}
+
+async function requestImageMarkerFromTextModel(opts: {
+  model: string;
+  userText: string;
+  userLang: string;
+}): Promise<string | null> {
+  // Fallback: force the model to output ONLY the marker block.
+  // Keep it strict to avoid polluting the chat reply.
+  const resp: any = await openai.chat.completions.create({
+    model: opts.model,
+    stream: false,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You must output ONLY a single image generation marker block, and nothing else.\n" +
+          "Format must be exactly:\n" +
+          "[[GENERATE_IMAGE]]\n" +
+          "prompt: <short, precise image description in the user's language>\n" +
+          "[[/GENERATE_IMAGE]]\n" +
+          "Rules: no extra text, no code fences, no JSON, no base64, no URLs.\n" +
+          `Language: write the prompt in ${opts.userLang}.`,
+      },
+      { role: "user", content: opts.userText },
+    ],
+  });
+
+  const text = resp?.choices?.[0]?.message?.content;
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  if (!trimmed.includes("[[GENERATE_IMAGE]]") || !trimmed.includes("[[/GENERATE_IMAGE]]")) {
+    return null;
+  }
+  return trimmed;
 }
 
 export async function POST(req: Request) {
@@ -509,7 +579,27 @@ export async function POST(req: Request) {
         }
 
         // Image generation (if requested by the text model)
-        const { cleanedText, prompt } = extractImageRequest(assistantText);
+        let { cleanedText, prompt } = extractImageRequest(assistantText);
+
+        // Fallback: if user clearly asked for an image but the model didn't emit the marker.
+        if (!prompt && isLikelyImageRequest(message)) {
+          try {
+            const userLang = detectedLang ?? "the user's language";
+            const markerText = await requestImageMarkerFromTextModel({
+              model,
+              userText: message,
+              userLang,
+            });
+            if (markerText) {
+              const extracted = extractImageRequest(markerText);
+              cleanedText = extracted.cleanedText;
+              prompt = extracted.prompt;
+            }
+          } catch {
+            // ignore fallback failures, proceed with normal text reply
+          }
+        }
+
         if (prompt) {
           const botMessageId = buildMessageId("b");
           const attachmentId = crypto.randomUUID();
