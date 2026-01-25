@@ -4,11 +4,11 @@ export const env = {
 
   // Текстовые модели
   // Основной чат (быстрый и дешёвый, default)
-  OPENAI_MODEL_CHAT: process.env.OPENAI_MODEL_CHAT ?? "gpt-4.1-mini",
+  OPENAI_MODEL_CHAT: process.env.OPENAI_MODEL_CHAT ?? "gpt-4o-mini",
 
   // Усиленный режим (сложные запросы, большие ТЗ)
   OPENAI_MODEL_CHAT_STRONG:
-    process.env.OPENAI_MODEL_CHAT_STRONG ?? "gpt-4.1",
+    process.env.OPENAI_MODEL_CHAT_STRONG ?? "gpt-4o",
 
   // Reasoning-модель (точечно, для сложной логики)
   OPENAI_MODEL_REASONING:
