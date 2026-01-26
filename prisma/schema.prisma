@@ -336,3 +336,10 @@ model CleanupLog {
 
   @@index([task_name, run_started_at])
 }
+
+// Persistent cursor for web-kb seed (discovery)
+model WebSeedCursor {
+  source_id  String   @id
+  queue      Json
+  updated_at DateTime @updatedAt
+}

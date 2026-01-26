@@ -232,6 +232,31 @@ function chunkTextByPseudoTokens(
   return out;
 }
 
+type SeedCursorQueueItem = {
+  url: string;
+};
+
+function parseCursorQueue(raw: unknown): URL[] {
+  if (!Array.isArray(raw)) return [];
+
+  const out: URL[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const url = (item as any).url;
+    if (typeof url !== "string") continue;
+    try {
+      out.push(normalizeUrlForKey(new URL(url)));
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+function serializeCursorQueue(queue: URL[]): SeedCursorQueueItem[] {
+  return queue.map((u) => ({ url: u.toString() }));
+}
+
 export async function seedWebSources(params: {
   sources?: WebSource[];
   maxPages?: number;
@@ -249,6 +274,7 @@ export async function seedWebSources(params: {
   sample: string[];
   stoppedReason: "time_budget_exhausted" | "max_pages" | "start_fetch_failed";
   startStatus: number | null;
+  cursor: Record<string, { queueSize: number }>;
 }> {
   const maxPages =
     typeof params.maxPages === "number" && Number.isFinite(params.maxPages)
@@ -267,6 +293,8 @@ export async function seedWebSources(params: {
   let inserted = 0;
   let updated = 0;
   const sample: string[] = [];
+
+  const cursor: Record<string, { queueSize: number }> = {};
 
   let stoppedReason:
     | "time_budget_exhausted"
@@ -293,16 +321,40 @@ export async function seedWebSources(params: {
       primaryLanguage: source.primaryLanguage,
     });
 
-    const queue: URL[] = [];
-    const seen = new Set<string>();
+    // Load queue cursor from DB; only if empty - use startUrls.
+    const existingCursor = await prisma.webSeedCursor.findUnique({
+      where: { source_id: source.id },
+      select: { queue: true },
+    });
 
-    for (const u of source.startUrls) {
-      try {
-        queue.push(normalizeUrlForKey(new URL(u)));
-      } catch {
-        // ignore
+    const queue: URL[] = parseCursorQueue(existingCursor?.queue);
+
+    if (queue.length === 0) {
+      for (const u of source.startUrls) {
+        try {
+          queue.push(normalizeUrlForKey(new URL(u)));
+        } catch {
+          // ignore
+        }
       }
     }
+
+    // Dedup only within this run.
+    const seenThisRun = new Set<string>();
+
+    const persistCursor = async () => {
+      await prisma.webSeedCursor.upsert({
+        where: { source_id: source.id },
+        create: {
+          source_id: source.id,
+          queue: serializeCursorQueue(queue) as any,
+        },
+        update: {
+          queue: serializeCursorQueue(queue) as any,
+        },
+      });
+      cursor[source.id] = { queueSize: queue.length };
+    };
 
     // Optionally: probe the first startUrl to set startStatus
     if (startStatus === null && queue.length > 0) {
@@ -311,29 +363,31 @@ export async function seedWebSources(params: {
         startStatus = probe.status;
         if (!probe.ok) {
           stoppedReason = "start_fetch_failed";
+          await persistCursor();
           break;
         }
       } catch {
         stoppedReason = "start_fetch_failed";
+        await persistCursor();
         break;
       }
     }
 
-    while (
-      queue.length > 0 &&
-      seen.size < perSourceCap &&
-      discoveredTotal < maxPages
-    ) {
+    let processedSincePersist = 0;
+
+    while (queue.length > 0 && discoveredTotal < maxPages) {
       if (deadline.isExpired()) {
         stoppedReason = "time_budget_exhausted";
         break;
       }
 
+      if (seenThisRun.size >= perSourceCap) break;
+
       const url = queue.shift()!;
       const normalizedUrl = normalizeUrlForKey(url);
       const key = normalizedUrl.toString();
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seenThisRun.has(key)) continue;
+      seenThisRun.add(key);
       discoveredTotal++;
 
       const isAllowed = isAllowedUrlForSource(source, normalizedUrl);
@@ -402,7 +456,15 @@ export async function seedWebSources(params: {
         if (!isAllowedUrlForSource(source, l)) continue;
         queue.push(l);
       }
+
+      processedSincePersist++;
+      if (processedSincePersist >= 10) {
+        processedSincePersist = 0;
+        await persistCursor();
+      }
     }
+
+    await persistCursor();
 
     if (discoveredTotal >= maxPages) {
       stoppedReason = "max_pages";
@@ -435,6 +497,7 @@ export async function seedWebSources(params: {
     updated,
     stoppedReason,
     startStatus,
+    cursor,
   });
 
   return {
@@ -450,6 +513,7 @@ export async function seedWebSources(params: {
     sample,
     stoppedReason,
     startStatus,
+    cursor,
   };
 }
 
