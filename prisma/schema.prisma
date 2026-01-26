@@ -240,7 +240,7 @@ model Image {
   alt_text String?
   source   ContentSource
 
-  page Page @relation(fields: [page_id], references: [page_id], onDelete: Cascade)
+  page Page @relation(fields: [page_id], references: [id], onDelete: Cascade)
 
   @@index([page_id])
 }
