@@ -8,7 +8,7 @@ export const env = {
 
   // Усиленный режим (сложные запросы, большие ТЗ)
   OPENAI_MODEL_CHAT_STRONG:
-    process.env.OPENAI_MODEL_CHAT_STRONG ?? "gpt-4.1",
+    process.env.OPENAI_MODEL_CHAT_STRONG ?? "gpt-5.2",
 
   // Reasoning-модель (точечно, для сложной логики)
   OPENAI_MODEL_REASONING:
