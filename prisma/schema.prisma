@@ -240,7 +240,7 @@ model Image {
   alt_text String?
   source   ContentSource
 
-  page Page @relation(fields: [page_id], references: [id], onDelete: Cascade)
+  page Page @relation(fields: [page_id], references: [page_id], onDelete: Cascade)
 
   @@index([page_id])
 }
@@ -335,4 +335,11 @@ model CleanupLog {
   errors                      Json?
 
   @@index([task_name, run_started_at])
+}
+
+// Persistent cursor for web-kb seed (discovery)
+model WebSeedCursor {
+  source_id  String   @id
+  queue      Json
+  updated_at DateTime @updatedAt
 }
