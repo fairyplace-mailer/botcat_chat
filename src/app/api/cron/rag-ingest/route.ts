@@ -36,7 +36,15 @@ function isAuthorized(req: Request): boolean {
   return token === expected;
 }
 
-async function ensureLockRow(name: string) {
+async function acquireDailyLock(params: {
+  name: string;
+  utcDateKey: string;
+  now: Date;
+}): Promise<boolean> {
+  const { name, utcDateKey, now } = params;
+
+  const lockedUntil = addMinutes(now, 20);
+
   await prisma.cronLock.upsert({
     where: { name },
     create: {
@@ -47,18 +55,6 @@ async function ensureLockRow(name: string) {
     },
     update: {},
   });
-}
-
-async function acquireDailyLock(params: {
-  name: string;
-  utcDateKey: string;
-  now: Date;
-}): Promise<boolean> {
-  const { name, utcDateKey, now } = params;
-
-  const lockedUntil = addMinutes(now, 20);
-
-  await ensureLockRow(name);
 
   const updated = await prisma.cronLock.updateMany({
     where: {
@@ -80,32 +76,6 @@ async function acquireDailyLock(params: {
   return updated.count === 1;
 }
 
-async function acquireFullRunLock(params: {
-  name: string;
-  now: Date;
-  minutes: number;
-}): Promise<boolean> {
-  const { name, now, minutes } = params;
-
-  const lockedUntil = addMinutes(now, minutes);
-
-  await ensureLockRow(name);
-
-  const updated = await prisma.cronLock.updateMany({
-    where: {
-      name,
-      locked_until: { lt: now },
-    },
-    data: {
-      locked_at: now,
-      locked_until: lockedUntil,
-      meta: { mode: "full", requestedAt: now.toISOString(), minutes },
-    },
-  });
-
-  return updated.count === 1;
-}
-
 export async function GET(req: Request) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
@@ -114,23 +84,11 @@ export async function GET(req: Request) {
   const runStartedAt = new Date();
   const utcDateKey = toUtcIsoDate(runStartedAt);
 
-  const url = new URL(req.url);
-  const mode = (url.searchParams.get("mode") ?? "").trim();
-  const lockMinutesRaw = (url.searchParams.get("lockMinutes") ?? "").trim();
-  const lockMinutes = lockMinutesRaw ? Number(lockMinutesRaw) : NaN;
-
-  const acquired =
-    mode === "full"
-      ? await acquireFullRunLock({
-          name: TASK_NAME,
-          now: runStartedAt,
-          minutes: Number.isFinite(lockMinutes) && lockMinutes > 0 ? lockMinutes : 180,
-        })
-      : await acquireDailyLock({
-          name: TASK_NAME,
-          utcDateKey,
-          now: runStartedAt,
-        });
+  const acquired = await acquireDailyLock({
+    name: TASK_NAME,
+    utcDateKey,
+    now: runStartedAt,
+  });
 
   if (!acquired) {
     return NextResponse.json({ ok: true, skipped: true, reason: "locked" });
@@ -139,8 +97,6 @@ export async function GET(req: Request) {
   try {
     const result = await ingestReferenceContext();
 
-    // CleanupLog schema doesn't have a `meta` field.
-    // Store ingest stats in `errors` for now to avoid runtime crash.
     await prisma.cleanupLog.create({
       data: {
         task_name: TASK_NAME,
@@ -148,7 +104,7 @@ export async function GET(req: Request) {
         run_finished_at: new Date(),
         deleted_attachments_count: 0,
         deleted_conversations_count: 0,
-        errors: [{ scope: "result", result }] as any,
+        errors: null,
       },
     });
 
