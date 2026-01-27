@@ -61,37 +61,62 @@ export const WEB_SOURCES: WebSource[] = [
     name: "Spoonflower Help/Info",
     type: "external",
     domain: "www.spoonflower.com",
-    startUrls: ["https://www.spoonflower.com/en"],
+    // Start from EN root, but keep a few known hubs as fallback.
+    startUrls: [
+      "https://www.spoonflower.com/en",
+      "https://www.spoonflower.com/en/help",
+      "https://www.spoonflower.com/en/faq",
+      "https://www.spoonflower.com/en/how-it-works",
+    ],
     source: "page",
     primaryLanguage: "en",
     refreshIntervalHours: 24 * 30,
     // Curated list is smaller; still cap for safety.
     maxPagesPerRun: 1500,
     mode: "curated",
+    // Goal: keep ONLY English (/en...) and include customer/policy + product info.
     allowPathPrefixes: [
+      // allow root so we can discover links
+      "/en",
+
+      // customer-facing help/policies/info
       "/en/help",
-      "/en/shipping",
-      "/en/fabric",
-      "/en/wallpaper",
-      "/en/home-decor",
       "/en/faq",
       "/en/how-it-works",
       "/en/about",
-      "/en/printing",
-      "/en/quality",
-      "/en/returns",
       "/en/contact",
       "/en/privacy",
       "/en/terms",
+      "/en/returns",
+      "/en/shipping",
+
+      // product categories & product information
+      "/en/fabric",
+      "/en/wallpaper",
+      "/en/home-decor",
+      "/en/printing",
+      "/en/quality",
+      "/en/products",
+      "/en/product",
+      "/en/pricing",
     ],
+    // Exclude designers/marketplace + individual design sales flows + account/commerce noise.
     denyPathSubstrings: [
-      "/design",
+      // designers / marketplace / individual designs
+      "/designers",
       "/designer",
+      "/design/",
+      "/designs",
       "/collection",
+      "/collections",
       "/shop",
       "/marketplace",
-      "/search",
+      "/sponsored",
       "/sponsor",
+      "/sell",
+
+      // shopping / account flows
+      "/search",
       "/favorites",
       "/my-",
       "/account",
