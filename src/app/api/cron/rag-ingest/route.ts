@@ -139,6 +139,8 @@ export async function GET(req: Request) {
   try {
     const result = await ingestReferenceContext();
 
+    // CleanupLog schema doesn't have a `meta` field.
+    // Store ingest stats in `errors` for now to avoid runtime crash.
     await prisma.cleanupLog.create({
       data: {
         task_name: TASK_NAME,
@@ -146,8 +148,7 @@ export async function GET(req: Request) {
         run_finished_at: new Date(),
         deleted_attachments_count: 0,
         deleted_conversations_count: 0,
-        errors: null,
-        meta: result as any,
+        errors: [{ scope: "result", result }] as any,
       },
     });
 
